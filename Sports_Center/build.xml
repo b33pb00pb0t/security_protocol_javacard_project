@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="sports-center-helloworld" default="build" basedir=".">
+    <description>Sports Center Hello World JavaCard template using ant-javacard</description>
+
+    <taskdef name="javacard"
+             classname="pro.javacard.ant.JavaCard"
+             classpath="ant-javacard.jar"/>
+
+    <property environment="env"/>
+    <condition property="jckit" value="${jc.home}">
+        <isset property="jc.home"/>
+    </condition>
+    <condition property="jckit" value="${env.JC_HOME}">
+        <not>
+            <isset property="jc.home"/>
+        </not>
+    </condition>
+
+    <fail unless="jckit"
+          message="Set -Djc.home=/path/to/javacard-sdk or export JC_HOME=/path/to/javacard-sdk before building."/>
+
+    <condition property="sdk.available">
+        <available file="${jckit}/lib/api_classic.jar"/>
+    </condition>
+
+    <fail unless="sdk.available"
+          message="JavaCard SDK not found at ${jckit}; expected lib/api_classic.jar."/>
+
+    <property name="src.dir" value="src/main/javacard"/>
+    <property name="build.dir" value="build"/>
+    <property name="dist.dir" value="dist"/>
+    <property name="classes.dir" value="${build.dir}/classes"/>
+    <property name="package.name" value="helloworld"/>
+    <property name="package.aid" value="DEADBEEF01"/>
+    <property name="applet.aid" value="DEADBEEF0100000001"/>
+    <property name="cap.output" value="${dist.dir}/HelloWorld.cap"/>
+
+    <target name="init">
+        <mkdir dir="${classes.dir}"/>
+        <mkdir dir="${dist.dir}"/>
+    </target>
+
+    <target name="compile" depends="init">
+        <javac srcdir="${src.dir}"
+               destdir="${classes.dir}"
+               includeantruntime="false"
+               classpath="${jckit}/lib/api_classic.jar"
+               source="1.6"
+               target="1.6"/>
+    </target>
+
+    <target name="build" depends="compile">
+        <javacard jckit="${jckit}">
+            <cap aid="${package.aid}"
+                 package="${package.name}"
+                 version="1.0"
+                 classes="${classes.dir}"
+                 output="${cap.output}">
+                <applet class="${package.name}.HelloWorldApplet"
+                        aid="${applet.aid}"/>
+            </cap>
+        </javacard>
+    </target>
+
+    <target name="clean">
+        <delete dir="${build.dir}"/>
+        <delete dir="${dist.dir}"/>
+    </target>
+
+    <target name="help">
+        <echo message="Sports Center JavaCard template"/>
+        <echo message="  ant -Djc.home=/path/to/javacard-sdk build"/>
+        <echo message="  ant -Djc.home=/path/to/javacard-sdk clean"/>
+    </target>
+</project>

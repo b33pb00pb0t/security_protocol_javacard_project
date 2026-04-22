@@ -1,3 +1,0 @@
-Manifest-Version: 1.0
-Created-By: Hello World Build
-Main-Class: helloworld.HelloWorldApplet
