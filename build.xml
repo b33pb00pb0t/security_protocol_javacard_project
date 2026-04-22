@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="HelloWorld" default="build" basedir=".">
+    <description>Hello World Javacard Applet Build - using ant-javacard</description>
+    
+    <!-- Load the ant-javacard task -->
+    <taskdef name="javacard" classname="pro.javacard.ant.JavaCard" 
+             classpath="Sports_Center/ant-javacard.jar"/>
+    
+    <!-- Properties -->
+    <property name="src.dir" value="src/main/java" />
+    <property name="build.dir" value="build" />
+    <property name="dist.dir" value="dist" />
+    <property name="classes.dir" value="${build.dir}/classes" />
+    <!-- Use 3.0.5 SDK which has better JDK compatibility -->
+    <property name="jckit" value="/home/b33pb00pb0t/.local/share/Trash/files/javacard-gradle-template/libs-sdks/jc305u3_kit" />
+    
+    <!-- Create build directories -->
+    <target name="init">
+        <mkdir dir="${classes.dir}" />
+        <mkdir dir="${dist.dir}" />
+    </target>
+    
+    <!-- Compile Java sources -->
+    <target name="compile" depends="init">
+        <javac srcdir="${src.dir}" 
+               destdir="${classes.dir}" 
+               includeantruntime="false"
+               classpath="${jckit}/lib/api_classic.jar" 
+               source="1.6" 
+               target="1.6" />
+    </target>
+    
+    <!-- Build CAP file using ant-javacard -->
+    <target name="build" depends="compile">
+        <javacard jckit="${jckit}">
+            <cap aid="DEADBEEF01" 
+                 package="helloworld" 
+                 version="1.0"
+                 classes="${classes.dir}"
+                 output="${dist.dir}/HelloWorld.cap">
+                <applet class="helloworld.HelloWorldApplet" 
+                        aid="DEADBEEF0100000001"/>
+            </cap>
+        </javacard>
+        <echo message="✓ Build successful! CAP file: ${dist.dir}/HelloWorld.cap" />
+    </target>
+    
+    <!-- Clean build artifacts -->
+    <target name="clean">
+        <delete dir="${build.dir}" />
+        <delete dir="${dist.dir}" />
+        <echo message="✓ Build artifacts cleaned" />
+    </target>
+    
+    <!-- Help target -->
+    <target name="help">
+        <echo message="HelloWorld Javacard Applet Build Targets:" />
+        <echo message="  ant build     - Compile and build CAP file (default)" />
+        <echo message="  ant compile   - Compile Java sources only" />
+        <echo message="  ant clean     - Remove all build artifacts" />
+        <echo message="  ant help      - Show this help message" />
+    </target>
+</project>
