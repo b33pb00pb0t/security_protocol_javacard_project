@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="sports-center-membership" default="build" basedir=".">
+    <description>Sports Center Membership JavaCard applet build using ant-javacard</description>
+
+    <taskdef name="javacard"
+             classname="pro.javacard.ant.JavaCard"
+             classpath="ant-javacard.jar"/>
+
+    <property environment="env"/>
+    <condition property="jckit.path" value="${jc.home}">
+        <isset property="jc.home"/>
+    </condition>
+    <condition property="jckit.path" value="${env.JC_HOME}">
+        <not>
+            <isset property="jc.home"/>
+        </not>
+    </condition>
+
+    <property name="jckit.version" value="3.1.0"/>
+
+    <fail unless="jckit.path"
+          message="Set -Djc.home=/path/to/javacard-sdk or export JC_HOME=/path/to/javacard-sdk before building."/>
+
+    <condition property="sdk.available">
+        <available file="${jckit.path}/lib/api_classic-3.1.0.jar"/>
+    </condition>
+
+    <fail unless="sdk.available"
+          message="JavaCard SDK ${jckit.version} not found at ${jckit.path}; expected lib/api_classic-3.1.0.jar."/>
+
+    <property name="api.jar" value="${jckit.path}/lib/api_classic-3.1.0.jar"/>
+
+    <property name="src.dir" value="src"/>
+    <property name="build.dir" value="build"/>
+    <property name="dist.dir" value="dist"/>
+    <property name="classes.dir" value="${build.dir}/classes"/>
+    <property name="package.name" value="com.sports.recreation"/>
+    <property name="package.aid" value="A00000010203"/>
+    <property name="applet.aid" value="A0000001020301"/>
+    <property name="applet.class" value="com.sports.recreation.MembershipApplet"/>
+    <property name="cap.output" value="${dist.dir}/MembershipApplet.cap"/>
+
+    <target name="init">
+        <mkdir dir="${classes.dir}"/>
+        <mkdir dir="${dist.dir}"/>
+    </target>
+
+    <target name="compile" depends="init">
+        <javac srcdir="${src.dir}"
+               destdir="${classes.dir}"
+               includeantruntime="false"
+               classpath="${api.jar}"
+               source="1.8"
+               target="1.8"/>
+    </target>
+
+    <target name="build" depends="compile">
+        <javacard jckit="${jckit.path}" source="1.8" target="1.8">
+            <cap aid="${package.aid}"
+                 package="${package.name}"
+                 version="1.0"
+                 classes="${classes.dir}"
+                 output="${cap.output}">
+                <applet class="${applet.class}"
+                        aid="${applet.aid}"/>
+            </cap>
+        </javacard>
+    </target>
+
+    <target name="clean">
+        <delete dir="${build.dir}"/>
+        <delete dir="${dist.dir}"/>
+    </target>
+
+    <target name="help">
+        <echo message="Sports Center Membership JavaCard build"/>
+        <echo message="  ant -Djc.home=/path/to/javacard-sdk build"/>
+        <echo message="  ant -Djc.home=/path/to/javacard-sdk clean"/>
+    </target>
+</project>
