@@ -1,10 +1,15 @@
 com\sports\recreation\frontend\AdminPanel.class
 com\sports\recreation\frontend\TerminalService.class
+com\sports\recreation\backend\BlockListRepository.class
+com\sports\recreation\backend\BlockListSnapshot.class
 com\sports\recreation\frontend\Main$1.class
 com\sports\recreation\frontend\MockTerminalService.class
 com\sports\recreation\frontend\Main.class
 com\sports\recreation\frontend\AuthService$Role.class
-com\sports\recreation\frontend\MasterPanel.class
 com\sports\recreation\frontend\AppFrame.class
 com\sports\recreation\frontend\LoginPanel.class
+com\sports\recreation\backend\MembershipAdminService.class
+com\sports\recreation\backend\CsvBlockListRepository.class
+com\sports\recreation\frontend\MasterPanel.class
+com\sports\recreation\backend\TerminalSyncService.class
 com\sports\recreation\frontend\AuthService.class

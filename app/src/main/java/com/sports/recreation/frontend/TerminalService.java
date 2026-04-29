@@ -13,6 +13,8 @@ public interface TerminalService {
 
     String readCardStatus(String memberId);
 
+    String viewBlockedCards();
+
     String initializeCard(String memberId);
 
     String personalizeCard(String memberId, String packageType);

@@ -30,13 +30,14 @@ public class AdminPanel extends JPanel {
         formPanel.add(new JLabel("Expiry Date (YYYYMMDD):"));
         formPanel.add(expiryDateField);
 
-        JPanel buttonPanel = new JPanel(new GridLayout(3, 2, 8, 8));
+        JPanel buttonPanel = new JPanel(new GridLayout(4, 2, 8, 8));
 
         JButton activateButton = new JButton("Activate Card");
         JButton deactivateButton = new JButton("Deactivate Card");
         JButton renewButton = new JButton("Renew Membership");
         JButton lostButton = new JButton("Report Lost/Stolen");
         JButton statusButton = new JButton("Read Card Status");
+        JButton viewBlockedButton = new JButton("View Blocked Cards");
         JButton logoutButton = new JButton("Logout");
 
         buttonPanel.add(activateButton);
@@ -44,6 +45,7 @@ public class AdminPanel extends JPanel {
         buttonPanel.add(renewButton);
         buttonPanel.add(lostButton);
         buttonPanel.add(statusButton);
+        buttonPanel.add(viewBlockedButton);
         buttonPanel.add(logoutButton);
 
         JPanel centerPanel = new JPanel(new BorderLayout(8, 8));
@@ -74,6 +76,9 @@ public class AdminPanel extends JPanel {
 
         statusButton.addActionListener(e ->
                 log(terminalService.readCardStatus(getMemberId())));
+
+        viewBlockedButton.addActionListener(e ->
+                log(terminalService.viewBlockedCards()));
 
         logoutButton.addActionListener(e -> appFrame.showLogin());
     }
