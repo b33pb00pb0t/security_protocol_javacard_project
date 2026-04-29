@@ -25,6 +25,7 @@ public final class MembershipApplet extends Applet {
     private static final byte INS_BLOCK = (byte) 0x14; // Administrator Terminal (AT) blocks the member's account.
     private static final byte INS_CHECKIN_T1 = (byte) 0x20; // Open-Access Terminal (OAT) checks in for Tier 1 facilities.
     private static final byte INS_CHECKIN_T2 = (byte) 0x22; // Controlled-Access Terminal (CAT) checks in for Tier 2 facilities.
+    private static final byte INS_GET_CARD_ID = (byte) 0x60; // Any Terminal queries the card's intrinsic ID for blocklist verification.
 
     // Persistent lifecycle states stored in EEPROM to survive card resets.
     private static final byte STATE_INITIALIZE = (byte) 0x00;
@@ -37,6 +38,7 @@ public final class MembershipApplet extends Applet {
     private byte dailyCounter;
     private final byte[] lastDate;
     private final byte[] memberId;
+    private final byte[] cardId;
     
     // Large persistent objects for security provisioning (allocated in constructor).
     private final byte[] cardCertificate;
@@ -57,6 +59,7 @@ public final class MembershipApplet extends Applet {
         dailyCounter = (byte) 0x00;
         lastDate = new byte[4];
         memberId = new byte[4];
+        cardId = new byte[4];
 
         // Allocate space for a standard 512-byte certificate in EEPROM. Be mindful of card EEPROM limits.
         cardCertificate = new byte[512];
@@ -104,6 +107,9 @@ public final class MembershipApplet extends Applet {
             case INS_CHECKIN_T2:
                 processCheckInTier2(apdu, buffer);
                 return;
+            case INS_GET_CARD_ID:
+                processGetCardId(apdu, buffer);
+                return;
             default:
                 ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);
         }
@@ -125,14 +131,18 @@ public final class MembershipApplet extends Applet {
         // Receive incoming data. For simplicity (per spec) we expect the whole payload in one call.
         short bytesRead = apdu.setIncomingAndReceive();
 
-        // We expect exactly 128 bytes: 64 for modulus + 64 for exponent (512-bit key components).
-        if (bytesRead != (short) 128) {
+        // We expect exactly 132 bytes: 64 for modulus + 64 for exponent (512-bit key components) + 4 for card ID.
+        if (bytesRead != (short) 132) {
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         }
 
         // Set the private key components from the received buffer. Offsets use ISO7816.OFFSET_CDATA.
         cardPrivateKey.setModulus(buffer, ISO7816.OFFSET_CDATA, (short) 64);
         cardPrivateKey.setExponent(buffer, (short) (ISO7816.OFFSET_CDATA + 64), (short) 64);
+
+        // Copy the intrinsic Card ID from the final 4 bytes of the APDU payload.
+        // This ID is used by terminals to verify against the synchronized block list (block_list.csv).
+        Util.arrayCopy(buffer, (short) (ISO7816.OFFSET_CDATA + 128), cardId, (short) 0, (short) 4);
 
         // Do not change the state here; successful return will send SW=0x9000 to the MT.
     }
@@ -165,20 +175,41 @@ public final class MembershipApplet extends Applet {
     }
 
     private void processBlock(APDU apdu, byte[] buffer) {
-        // TODO: Permit blocking from any state except STATE_BLOCKED.
-        // TODO: Transition to STATE_BLOCKED and preserve existing identifiers.
-        ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
+        // Card blocking is an irreversible lifecycle state for lost or stolen cards.
+        // The AT can block a card from ACTIVE or INACTIVE state.
+        // However, if the card is already BLOCKED, the command is redundant and an error is returned.
+
+        // Security check: reject if the card is already in the blocked state.
+        if (currentState == STATE_BLOCKED) {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+
+        // Transition the card to the BLOCKED state. This is irreversible without card replacement.
+        currentState = STATE_BLOCKED;
+
+        // Implicit return sends SW=0x9000 to acknowledge successful blocking.
     }
 
-    private void processCheckInTier1(APDU apdu, byte[] buffer) {
+    private void processCheckInTier1(APDU apdu, byte[] buffer) { // Open-Access Terminal (OAT) check-in for Tier 1 facilities.
         // TODO: Require STATE_ACTIVE and validate dailyCounter limits for tier 1 access.
         // TODO: Update lastDate and dailyCounter using existing EEPROM arrays.
         ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
     }
 
-    private void processCheckInTier2(APDU apdu, byte[] buffer) {
+    private void processCheckInTier2(APDU apdu, byte[] buffer) { // Controlled-Access Terminal (CAT) check-in for Tier 2 facilities.
         // TODO: Require STATE_ACTIVE and validate tier 2 entitlements before incrementing.
         // TODO: Update lastDate and dailyCounter using existing EEPROM arrays.
         ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
     }
+
+    private void processGetCardId(APDU apdu, byte[] buffer) {
+        // The GET_CARD_ID command is available in any state and requires no authentication.
+        // Terminals use the returned card ID to verify the card against the synchronized block list.
+        // The card ID is the intrinsic identifier (ID_C) provisioned during initialization.
+
+        byte[] responseBuffer = apdu.getBuffer();
+        Util.arrayCopy(cardId, (short) 0, responseBuffer, (short) 0, (short) 4);
+        apdu.setOutgoingAndSend((short) 0, (short) 4);
+    }
 }
+    
