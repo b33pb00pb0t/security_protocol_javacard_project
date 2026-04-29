@@ -115,7 +115,6 @@ public final class MembershipApplet extends Applet {
         // Legacy JavaCard 2.2.1 / Java 1.5 constraints:
         // - Standard APDU data field is limited to 255 bytes; using 512-bit RSA (64+64=128 bytes)
         //   allows the MT to send modulus+exponent in a single standard APDU without extended length.
-        // - All persistent objects (keys, arrays) must be allocated at install time; no 'new' in handlers.
 
         // Security check: only allow initialization when the card is in STATE_INITIALIZE.
         if (currentState != STATE_INITIALIZE) {
