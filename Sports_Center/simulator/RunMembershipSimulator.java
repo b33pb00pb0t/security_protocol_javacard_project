@@ -28,7 +28,20 @@ public final class RunMembershipSimulator {
 
         // Send SELECT and then the INITIALIZE APDU.
         byte[] selectResponse = simulator.transmitCommand(selectApdu);
-        byte[] initResponse = simulator.transmitCommand(new byte[]{(byte) 0xB0, (byte) 0x10, 0x00, 0x00});
+        byte[] initApdu = new byte[5 + 128];
+        initApdu[0] = (byte) 0xB0;
+        initApdu[1] = (byte) 0x10;
+        initApdu[2] = 0x00;
+        initApdu[3] = 0x00;
+        initApdu[4] = (byte) 0x80;
+
+        // Fill the 128-byte payload with a deterministic test pattern.
+        // The applet currently treats this as 64 bytes of modulus followed by 64 bytes of exponent.
+        for (int i = 0; i < 128; i++) {
+            initApdu[5 + i] = (byte) (i & 0xFF);
+        }
+
+        byte[] initResponse = simulator.transmitCommand(initApdu);
 
         // Separate the returned data bytes from the trailing two-byte status word.
         int selectSw = ((selectResponse[selectResponse.length - 2] & 0xFF) << 8)

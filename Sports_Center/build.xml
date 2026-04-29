@@ -16,19 +16,19 @@
         </not>
     </condition>
 
-    <property name="jckit.version" value="3.1.0"/>
+    <property name="jckit.version" value="2.2.1"/>
 
     <fail unless="jckit.path"
           message="Set -Djc.home=/path/to/javacard-sdk or export JC_HOME=/path/to/javacard-sdk before building."/>
 
     <condition property="sdk.available">
-        <available file="${jckit.path}/lib/api_classic-3.1.0.jar"/>
+        <available file="${jckit.path}/lib/api_classic-2.2.1.jar"/>
     </condition>
 
     <fail unless="sdk.available"
-          message="JavaCard SDK ${jckit.version} not found at ${jckit.path}; expected lib/api_classic-3.1.0.jar."/>
+          message="JavaCard SDK ${jckit.version} not found at ${jckit.path}; expected lib/api_classic-2.2.1.jar."/>
 
-    <property name="api.jar" value="${jckit.path}/lib/api_classic-3.1.0.jar"/>
+    <property name="api.jar" value="${jckit.path}/lib/api_classic-2.2.1.jar"/>
 
     <property name="src.dir" value="src"/>
     <property name="build.dir" value="build"/>
@@ -55,7 +55,7 @@
     </target>
 
     <target name="build" depends="compile">
-        <javacard jckit="${jckit.path}" source="1.8" target="1.8">
+        <javacard jckit="${jckit.path}" source="1.5" target="1.5">
             <cap aid="${package.aid}"
                  package="${package.name}"
                  version="1.0"
