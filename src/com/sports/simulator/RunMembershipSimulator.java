@@ -1,4 +1,4 @@
-import com.licel.jcardsim.base.Simulator;
+/*import com.licel.jcardsim.base.Simulator;
 import com.sports.recreation.MembershipApplet;
 
 import javacard.framework.AID;
@@ -67,3 +67,4 @@ public final class RunMembershipSimulator {
         return bytes;
     }
 }
+*/
