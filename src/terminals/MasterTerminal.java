@@ -1,4 +1,4 @@
-package com.sports.simulator;
+package terminals;
 
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import javax.smartcardio.*;
@@ -31,11 +31,7 @@ public class MasterTerminal extends BaseTerminal {
         CommandAPDU cmd = new CommandAPDU(CLA_PROPRIETARY, INS_INITIALIZE_KEY, 0x00, 0x00, payload);
         ResponseAPDU res = channel.transmit(cmd);
         
-        if (res.getSW() == 0x9000) {
-            System.out.println("[MT] Private Key successfully initialized.");
-        } else {
-            System.err.println("[MT] Error initializing key. SW: " + Integer.toHexString(res.getSW()));
-        }
+        handleResponse(res, "Private Key Initialization");
     }
 
     /**
@@ -51,11 +47,7 @@ public class MasterTerminal extends BaseTerminal {
         CommandAPDU cmd = new CommandAPDU(CLA_PROPRIETARY, INS_LOAD_MASTER_KEY, 0x00, 0x00, payload);
         ResponseAPDU res = channel.transmit(cmd);
 
-        if (res.getSW() == 0x9000) {
-            System.out.println("[MT] Master Public Key successfully loaded.");
-        } else {
-            System.err.println("[MT] Error loading Master Key. SW: " + Integer.toHexString(res.getSW()));
-        }
+        handleResponse(res, "Master Key Loading");
     }
 
     /**
@@ -77,11 +69,7 @@ public class MasterTerminal extends BaseTerminal {
         CommandAPDU cmd = new CommandAPDU(CLA_PROPRIETARY, INS_LOAD_CERT, 0x00, 0x00, certData);
         ResponseAPDU res = channel.transmit(cmd);
 
-        if (res.getSW() == 0x9000) {
-            System.out.println("[MT] Card Certificate successfully loaded.");
-        } else {
-            System.err.println("[MT] Error loading certificate. SW: " + Integer.toHexString(res.getSW()));
-        }
+        handleResponse(res, "Certificate Loading");
     }
 
     //UTILITIES 
@@ -94,10 +82,21 @@ public class MasterTerminal extends BaseTerminal {
         return dest;
     }
 
+    private void handleResponse(ResponseAPDU res, String opName) {
+        if (res.getSW() == 0x9000) {
+            System.out.println("[MT] " + opName + " successful.");
+        } else {
+            System.err.println("[MT] " + opName + " failed. SW: " + Integer.toHexString(res.getSW()));
+        }
+    }
+
     public void startProcess() {
-        if (connect()) {
+        if (!connect()) {
+            System.err.println("[MT] Failed to connect to card.");
+            return;
+        }
             try {
-                System.out.println("Connection OK!");
+                System.out.println("Connection OK! (Master Terminal)");
                 
                 KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA", "BC");
                 keyGen.initialize(512);
@@ -112,14 +111,14 @@ public class MasterTerminal extends BaseTerminal {
                 loadCertificate(cardId, (RSAPublicKey) cardKeyPair.getPublic());
 
             } catch (CardException e) {
-                System.err.println("Communication error with the card: " + e.getMessage());
+                System.err.println("[MT] Communication error with the card: " + e.getMessage());
             } catch (Exception e) {
-                System.err.println("General error: " + e.getMessage());
+                System.err.println("[MT] General error: " + e.getMessage());
             } finally {
                 disconnect(false);
             }
         }
-}
+
     public static void main(String[] args) {
         MasterTerminal mt = new MasterTerminal();        
         mt.startProcess();

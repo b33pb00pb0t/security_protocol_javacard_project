@@ -1,4 +1,4 @@
-package com.sports.applet;
+package applet;
 
 import javacard.framework.APDU;
 import javacard.framework.Applet;
@@ -27,6 +27,7 @@ public final class MembershipApplet extends Applet {
                                                                         //
     private static final byte INS_ACTIVATE = (byte) 0x13; // Administrator Terminal (AT) activates the member's account.
     private static final byte INS_BLOCK = (byte) 0x14; // Administrator Terminal (AT) blocks the member's account.
+                                                                        //
     private static final byte INS_CHECKIN_T1 = (byte) 0x20; // Open-Access Terminal (OAT) checks in for Tier 1 facilities.
     private static final byte INS_T2_STEP1 = (byte) 0x21; // Controlled-Access Terminal (CAT) begins Tier 2 mutual authentication.
     private static final byte INS_T2_STEP2 = (byte) 0x22; // Controlled-Access Terminal (CAT) completes Tier 2 mutual authentication.

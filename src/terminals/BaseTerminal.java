@@ -1,16 +1,15 @@
-package com.sports.simulator;
+package terminals;
 
 import javax.smartcardio.*;
 import java.util.List;
 
 public abstract class BaseTerminal {
-    // Queste sono le variabili di istanza che verranno usate da MasterTerminal
     protected Card card;
     protected CardChannel channel;
 
     protected static final byte[] APPLET_AID = {
-        (byte) 0x01, (byte) 0x02, (byte) 0x03, (byte) 0x04, (byte) 0x05, 
-        (byte) 0x06, (byte) 0x07, (byte) 0x08, (byte) 0x09, (byte) 0x00
+        (byte) 0xA0, (byte) 0x00, (byte) 0x00, (byte) 0x01, 
+        (byte) 0x02, (byte) 0x03, (byte) 0x01 
     };
 
     public boolean connect() {
