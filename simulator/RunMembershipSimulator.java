@@ -4,135 +4,170 @@ import javacard.framework.AID;
 import java.math.BigInteger;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
-import java.security.interfaces.RSAPublicKey;
 import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
+import java.util.Scanner;
 
+/**
+ * Harness for simulating the Sports Center Membership protocol.
+ * This class coordinates the interaction between the Applet logic
+ * and the simulated Master/Administrator terminals.
+ */
 public final class RunMembershipSimulator {
-    private static final String APPLET_AID = "A0000001020301"; 
+    
+    // AID defined in your BaseTerminal and Applet sources
+    private static final byte[] AID_BYTES = {
+        (byte) 0xA0, (byte) 0x00, (byte) 0x00, (byte) 0x01, 
+        (byte) 0x02, (byte) 0x03, (byte) 0x01 
+    };
 
-    public static void main(String[] args) {
+    private static final byte CLA_PROPRIETARY = (byte) 0xB0; 
+
+    public static void main(String[] args) throws Exception {
+        // 1. Initialize Simulator and Applet
         Simulator simulator = new Simulator();
-        AID appletAID = createAid(APPLET_AID);
-        
-        // Install and automatically select the applet
-        simulator.installApplet(appletAID, MembershipApplet.class);
-        simulator.selectApplet(appletAID);
+        // Install the applet and capture the boolean result
+        AID appletAID = new AID(AID_BYTES, (short) 0, (byte) AID_BYTES.length);
 
-        // --- PHASE 1: MASTER TERMINAL (MT) - Provisioning ---
-        System.out.println("--- MASTER TERMINAL OPERATIONS ---");
+        Object result = simulator.installApplet(appletAID, MembershipApplet.class);
 
-        // Generate a real RSA key pair to avoid 6F00 errors
-        KeyPair cardKeyPair = generateRsaKeyPair();
-        RSAPrivateKey cardPriv = (RSAPrivateKey) cardKeyPair.getPrivate();
-
-        // 1. INS_INITIALIZE_KEY (0x10): Load the card private key
-        byte[] initKeyApdu = new byte[5 + 128];
-        initKeyApdu[0] = (byte) 0xB0; // CLA
-        initKeyApdu[1] = (byte) 0x10; // INS
-        initKeyApdu[4] = (byte) 0x80; // Lc (128 bytes)
-
-        // Copy modulus and private exponent into APDU payload
-        copyBigInteger(cardPriv.getModulus(), initKeyApdu, 5, 64);
-        copyBigInteger(cardPriv.getPrivateExponent(), initKeyApdu, 5 + 64, 64);
-        
-        byte[] initKeyRes = simulator.transmitCommand(initKeyApdu);
-        printStatus("INIT_KEY", initKeyRes);
-
-        // 2. INS_LOAD_CERT (0x11): Load master certificate (dummy data)
-        byte[] loadCertApdu = new byte[5 + 135];
-        loadCertApdu[0] = (byte) 0xB0;
-        loadCertApdu[1] = (byte) 0x11;
-        loadCertApdu[4] = (byte) 0x87; // Lc (135 bytes)
-
-        // Fill with dummy certificate data
-        for (int i = 0; i < 135; i++) {
-            loadCertApdu[5 + i] = (byte) 0xCC;
+        // 3. Print the operation success in English
+        if (result != null) {
+            System.out.println("Applet Installation: SUCCESS (SW: 9000)");
+        } else {
+            System.out.println("Applet Installation: FAILED");
         }
-
-        byte[] loadCertRes = simulator.transmitCommand(loadCertApdu);
-        printStatus("LOAD_CERT", loadCertRes);
-
-        // 3. INS_LOAD_MASTER_KEY (0x12): Load master public key
-        KeyPair masterKeyPair = generateRsaKeyPair();
-        byte[] masterPKPayload = encodeRsaPublicKey((RSAPublicKey) masterKeyPair.getPublic());
         
-        byte[] loadMasterKeyApdu = new byte[5 + 67];
-        loadMasterKeyApdu[0] = (byte) 0xB0;
-        loadMasterKeyApdu[1] = (byte) 0x12;
-        loadMasterKeyApdu[4] = (byte) 0x43; // Lc (67 bytes)
+        System.out.println("--- JCARDSIM SIMULATOR STARTED ---");
+        boolean selected = simulator.selectApplet(appletAID);
+        System.out.println("Applet Selection: " + (selected ? "OK (9000)" : "FAILED"));
 
-        System.arraycopy(masterPKPayload, 0, loadMasterKeyApdu, 5, 67);
+        Scanner scanner = new Scanner(System.in);
+        
+        while (true) {
+            System.out.println("\n--- SELECT TERMINAL TO SIMULATE ---");
+            System.out.println("1. [MASTER] Initialize Keys and Certificate");
+            System.out.println("2. [ADMIN]  Activate Card");
+            System.out.println("3. [ADMIN]  Block Card");
+            System.out.println("4. Exit");
+            System.out.print("Choice > ");
+            
+            if (!scanner.hasNextInt()) break;
+            int choice = scanner.nextInt();
+            if (choice == 4) break;
 
-        byte[] loadMasterKeyRes = simulator.transmitCommand(loadMasterKeyApdu);
-        printStatus("LOAD_MASTER_KEY", loadMasterKeyRes);
+            switch (choice) {
+                case 1:
+                    runMasterPhase(simulator);
+                    break;
+                case 2:
+                    runAdminActivate(simulator);
+                    break;
+                case 3:
+                    runAdminBlock(simulator);
+                    break;
+                default:
+                    System.out.println("Invalid choice.");
+            }
+        }
+        System.out.println("Closing simulator...");
+        scanner.close();
+    }
 
+    private static void runMasterPhase(Simulator sim) {      
+        try {
+            System.out.println("\n[MT] Starting Provisioning (Generating NEW keys)...");
 
-        // --- PHASE 2: ADMINISTRATOR TERMINAL (AT) - Lifecycle Management ---
-        System.out.println("\n--- ADMINISTRATOR TERMINAL OPERATIONS ---");
+            KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
+            keyGen.initialize(512); // standard 512-bit for your applet
 
-        // 4. INS_ACTIVATE (0x13): Activate member card
-        byte[] activateApdu = new byte[5 + 8];
-        activateApdu[0] = (byte) 0xB0;
-        activateApdu[1] = (byte) 0x13;
-        activateApdu[4] = (byte) 0x08; // Lc (8 bytes)
+            // Generating pairs
+            KeyPair masterKeyPair = keyGen.generateKeyPair();
+            KeyPair cardKeyPair = keyGen.generateKeyPair();
+            
+            // Extracting components
+            RSAPrivateKey cardPriv = (RSAPrivateKey) cardKeyPair.getPrivate();
+            RSAPublicKey cardPub = (RSAPublicKey) cardKeyPair.getPublic();
+            RSAPublicKey masterPk = (RSAPublicKey) masterKeyPair.getPublic();
 
-        // Member ID (4 bytes) + Date (4 bytes)
-        byte[] activationData = {
-            (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x01, // Member ID
-            (byte)0x20, (byte)0x26, (byte)0x05, (byte)0x03  // Date (YYMMDD format or similar)
+            // --- COMMAND SENDING ---
+
+            byte[] initPayload = new byte[128];
+            System.arraycopy(toFixedByteArray(cardPriv.getModulus(), 64), 0, initPayload, 0, 64);
+            System.arraycopy(toFixedByteArray(cardPriv.getPrivateExponent(), 64), 0, initPayload, 64, 64);
+            sendCommand(sim, (byte)0x10, initPayload, "Private Key Initialization");
+
+            byte[] masterPayload = new byte[67];
+            System.arraycopy(toFixedByteArray(masterPk.getModulus(), 64), 0, masterPayload, 0, 64);
+            System.arraycopy(toFixedByteArray(masterPk.getPublicExponent(), 3), 0, masterPayload, 64, 3);
+            sendCommand(sim, (byte)0x12, masterPayload, "Master Public Key Loading");
+
+            byte[] certData = new byte[135];
+            byte[] cardId = {0x00, 0x00, 0x00, 0x01};
+            System.arraycopy(cardId, 0, certData, 0, 4);
+            System.arraycopy(toFixedByteArray(cardPub.getModulus(), 64), 0, certData, 4, 64);
+            System.arraycopy(toFixedByteArray(cardPub.getPublicExponent(), 3), 0, certData, 68, 3);
+            sendCommand(sim, (byte)0x11, certData, "Certificate Loading");
+
+            // --- DEBUG PRINT ---
+            System.out.println("\n--- GENERATED CARD KEYS ---");
+            System.out.println("Modulus: " + toHexString(cardPub.getModulus()));
+            System.out.println("Public Exponent:  " + cardPub.getPublicExponent());
+            System.out.println("Private Exponent: " + toHexString(cardPriv.getPrivateExponent()));
+
+        } catch (Exception e) {
+            System.err.println("Error during Master Phase: " + e.getMessage());
+        }
+    }
+
+    // --- ADMIN TERMINAL LOGIC (Adapted from Source 2) ---
+    private static void runAdminActivate(Simulator sim) {
+        System.out.println("\n[AT] Activating Card...");
+        // Payload: Member ID (4 bytes) + Date (4 bytes)[cite: 1, 2]
+        byte[] payload = {
+            0x00, 0x00, 0x04, (byte)0xD2, // ID 1234
+            0x20, 0x26, 0x05, 0x03        // Date 2026-05-03
         };
-        System.arraycopy(activationData, 0, activateApdu, 5, 8);
+        sendCommand(sim, (byte)0x13, payload, "Card Activation");
+    }
 
-        byte[] activateRes = simulator.transmitCommand(activateApdu);
-        printStatus("ACTIVATE_CARD", activateRes);
-
-        // 5. INS_BLOCK (0x14): Block the card (irreversibility test)
-        byte[] blockApdu = new byte[]{(byte) 0xB0, (byte) 0x14, 0x00, 0x00};
-        byte[] blockRes = simulator.transmitCommand(blockApdu);
-        printStatus("BLOCK_CARD", blockRes);
+    private static void runAdminBlock(Simulator sim) {
+        System.out.println("\n[AT] Blocking Card...");
+        sendCommand(sim, (byte)0x14, null, "Card Blocking"); //[cite: 1, 2]
     }
 
     // --- HELPER METHODS ---
+    private static void sendCommand(Simulator sim, byte ins, byte[] data, String label) {
+        int lc = (data != null) ? data.length : 0;
+        byte[] apdu = new byte[5 + lc];
+        apdu[0] = CLA_PROPRIETARY;
+        apdu[1] = ins;
+        apdu[2] = 0x00; // P1
+        apdu[3] = 0x00; // P2
+        apdu[4] = (byte) lc;
+        if (data != null) System.arraycopy(data, 0, apdu, 5, lc);
 
-    // Print APDU status word (SW)
-    private static void printStatus(String op, byte[] response) {
+        byte[] response = sim.transmitCommand(apdu);
         int sw = ((response[response.length - 2] & 0xFF) << 8) | (response[response.length - 1] & 0xFF);
-        System.out.println(op + " SW: " + String.format("%04X", sw));
-    }
-
-    // Generate a 512-bit RSA key pair
-    private static KeyPair generateRsaKeyPair() {
-        try {
-            KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA");
-            gen.initialize(512);
-            return gen.generateKeyPair();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        
+        System.out.println(" >> " + label + " Response SW: " + String.format("%04X", sw));
+        if (sw == 0x9000) {
+            System.out.println("    Status: SUCCESS");
+        } else {
+            System.out.println("    Status: FAILED");
         }
     }
 
-    // Encode RSA public key into fixed-length byte array
-    private static byte[] encodeRsaPublicKey(RSAPublicKey pk) {
-        byte[] out = new byte[67];
-        copyBigInteger(pk.getModulus(), out, 0, 64);
-        copyBigInteger(pk.getPublicExponent(), out, 64, 3);
-        return out;
-    }
-
-    // Copy BigInteger into fixed-length byte array with padding/truncation
-    private static void copyBigInteger(BigInteger val, byte[] dest, int off, int len) {
+    private static byte[] toFixedByteArray(BigInteger val, int len) {
         byte[] src = val.toByteArray();
-        int srcOff = src.length > len ? src.length - len : 0;
-        int copyLen = Math.min(src.length, len);
-        System.arraycopy(src, srcOff, dest, off + (len - copyLen), copyLen);
+        byte[] dest = new byte[len];
+        int startSrc = (src.length > len) ? src.length - len : 0;
+        int lenToCopy = Math.min(src.length, len);
+        System.arraycopy(src, startSrc, dest, len - lenToCopy, lenToCopy);
+        return dest;
     }
 
-    // Convert hex string to AID object
-    private static AID createAid(String hex) {
-        byte[] b = new byte[hex.length() / 2];
-        for (int i = 0; i < b.length; i++) {
-            b[i] = (byte) Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
-        }
-        return new AID(b, (short) 0, (byte) b.length);
+    private static String toHexString(BigInteger val) {
+        return String.format("%0128x", val); // Forza 128 caratteri hex per moduli a 512 bit
     }
 }
