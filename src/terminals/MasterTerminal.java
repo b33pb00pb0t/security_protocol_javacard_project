@@ -5,6 +5,7 @@ import javax.smartcardio.*;
 import java.security.*;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
+import java.io.FileOutputStream;
 import java.math.BigInteger;
 
 public class MasterTerminal extends BaseTerminal {
@@ -17,62 +18,89 @@ public class MasterTerminal extends BaseTerminal {
     private static final byte INS_LOAD_CERT = (byte) 0x11;
     private static final byte INS_LOAD_MASTER_KEY = (byte) 0x12;
     
-    /**
-     * Operation 1: Provision the card's private key (RSA 512-bit)
-     */
+    private KeyPair masterKeyPair;
+
+    public MasterTerminal() throws NoSuchAlgorithmException, NoSuchProviderException {
+        KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA", "BC");
+        keyGen.initialize(512);
+        this.masterKeyPair = keyGen.generateKeyPair();
+    }
+
+    //save master public key to file for Terminals usage
+    public void saveMasterPublicKey(String filePath) throws Exception {
+        byte[] pubKeyBytes = masterKeyPair.getPublic().getEncoded();
+        try (FileOutputStream fos = new FileOutputStream(filePath)) {
+            fos.write(pubKeyBytes);
+        }
+        System.out.println("[MT] Master Public Key salvata in: " + filePath);
+    }
+
+    //APPLET OPERATIONS
     private void initializeKey(KeyPair cardKeyPair) throws CardException {
         RSAPrivateKey privateKey = (RSAPrivateKey) cardKeyPair.getPrivate();
         byte[] payload = new byte[128];
-        
-        // 64 bytes Modulus + 64 bytes Private Exponent
+
         System.arraycopy(toFixedByteArray(privateKey.getModulus(), 64), 0, payload, 0, 64);
         System.arraycopy(toFixedByteArray(privateKey.getPrivateExponent(), 64), 0, payload, 64, 64);
 
-        CommandAPDU cmd = new CommandAPDU(CLA_PROPRIETARY, INS_INITIALIZE_KEY, 0x00, 0x00, payload);
-        ResponseAPDU res = channel.transmit(cmd);
-        
+        ResponseAPDU res = send(new CommandAPDU(CLA_PROPRIETARY, INS_INITIALIZE_KEY, 0x00, 0x00, payload));
         handleResponse(res, "Private Key Initialization");
     }
 
-    /**
-     * Operation 2: Load the Master Public Key onto the card
-     */
-    private void loadMasterKey(RSAPublicKey masterPublicKey) throws CardException {
+    private void loadMasterKey() throws CardException {
+        RSAPublicKey masterPublicKey = (RSAPublicKey) masterKeyPair.getPublic();
+
         byte[] payload = new byte[67];
-        
-        // 64 bytes Modulus + 3 bytes Exponent (usually 65537)
         System.arraycopy(toFixedByteArray(masterPublicKey.getModulus(), 64), 0, payload, 0, 64);
         System.arraycopy(toFixedByteArray(masterPublicKey.getPublicExponent(), 3), 0, payload, 64, 3);
 
-        CommandAPDU cmd = new CommandAPDU(CLA_PROPRIETARY, INS_LOAD_MASTER_KEY, 0x00, 0x00, payload);
-        ResponseAPDU res = channel.transmit(cmd);
-
+        ResponseAPDU res = send(new CommandAPDU(CLA_PROPRIETARY, INS_LOAD_MASTER_KEY, 0x00, 0x00, payload));
         handleResponse(res, "Master Key Loading");
     }
 
-    /**
-     * Operation 3: Load the Master-signed certificate onto the card
-     */
-    private void loadCertificate(byte[] cardId, RSAPublicKey cardPubKey) throws CardException {
-        // CertC Structure: ID_C (4) + PK_C Mod (64) + PK_C Exp (3) + Signature (64) = 135 bytes total
-        byte[] certData = new byte[135];
-        
-        System.arraycopy(cardId, 0, certData, 0, 4);
-        System.arraycopy(toFixedByteArray(cardPubKey.getModulus(), 64), 0, certData, 4, 64);
-        System.arraycopy(toFixedByteArray(cardPubKey.getPublicExponent(), 3), 0, certData, 68, 3);
-        
-        // Placeholder for the actual signature. In a production environment, 
-        // this would be the RSA signature of the first 71 bytes using the Master Private Key.
-        byte[] dummySignature = new byte[64];
-        System.arraycopy(dummySignature, 0, certData, 71, 64);
+    private void loadCertificate(byte[] cardId, RSAPublicKey cardPubKey)
+            throws Exception {
 
-        CommandAPDU cmd = new CommandAPDU(CLA_PROPRIETARY, INS_LOAD_CERT, 0x00, 0x00, certData);
-        ResponseAPDU res = channel.transmit(cmd);
+        final int ID_LEN = 4;
+        final int MOD_LEN = 64;
+        final int EXP_LEN = 3;
+        final int SIG_LEN = 64;
+        final int DATA_LEN = 71;
+        final int CERT_LEN = 135;
 
+        byte[] certData = new byte[CERT_LEN];
+
+        System.arraycopy(cardId, 0, certData, 0, ID_LEN);
+        System.arraycopy(toFixedByteArray(cardPubKey.getModulus(), MOD_LEN), 0, certData, 4, MOD_LEN);
+        System.arraycopy(toFixedByteArray(cardPubKey.getPublicExponent(), EXP_LEN), 0, certData, 68, EXP_LEN);
+
+        // Firma con la master private key
+        Signature sig = Signature.getInstance("SHA1withRSA", "BC");
+        sig.initSign(masterKeyPair.getPrivate());
+        sig.update(certData, 0, DATA_LEN);
+        byte[] signature = sig.sign();
+
+        if (signature.length != SIG_LEN) {
+            throw new IllegalStateException("Invalid signature length: " + signature.length);
+        }
+
+        Signature verifySig = Signature.getInstance("SHA1withRSA", "BC");
+        verifySig.initVerify(masterKeyPair.getPublic());
+        verifySig.update(certData, 0, DATA_LEN);
+
+        if (!verifySig.verify(signature)) {
+            throw new RuntimeException("Signature verification failed");
+        }
+
+        System.arraycopy(signature, 0, certData, DATA_LEN, SIG_LEN);
+
+        ResponseAPDU res = send(new CommandAPDU(CLA_PROPRIETARY, INS_LOAD_CERT, 0x00, 0x00, certData));
         handleResponse(res, "Certificate Loading");
     }
+    /////////////////// end of applet operations
 
-    //UTILITIES 
+
+    // uility functions
     private static byte[] toFixedByteArray(BigInteger val, int len) {
         byte[] src = val.toByteArray();
         byte[] dest = new byte[len];
@@ -89,38 +117,38 @@ public class MasterTerminal extends BaseTerminal {
             System.err.println("[MT] " + opName + " failed. SW: " + Integer.toHexString(res.getSW()));
         }
     }
+    /////////////////// end of utility functions
+    
 
     public void startProcess() {
         if (!connect()) {
             System.err.println("[MT] Failed to connect to card.");
             return;
         }
-            try {
-                System.out.println("Connection OK! (Master Terminal)");
-                
-                KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA", "BC");
-                keyGen.initialize(512);
-                KeyPair masterKeyPair = keyGen.generateKeyPair();
-                KeyPair cardKeyPair = keyGen.generateKeyPair();
 
-                // Ora puoi chiamare i metodi in sicurezza
-                initializeKey(cardKeyPair);
-                loadMasterKey((RSAPublicKey) masterKeyPair.getPublic());
-                
-                byte[] cardId = {0x00, 0x00, 0x00, 0x01};
-                loadCertificate(cardId, (RSAPublicKey) cardKeyPair.getPublic());
+        try {
+            System.out.println("Connection OK! (Master Terminal)");
 
-            } catch (CardException e) {
-                System.err.println("[MT] Communication error with the card: " + e.getMessage());
-            } catch (Exception e) {
-                System.err.println("[MT] General error: " + e.getMessage());
-            } finally {
-                disconnect(false);
-            }
+            KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA", "BC");
+            keyGen.initialize(512);
+
+            KeyPair cardKeyPair = keyGen.generateKeyPair();
+
+            initializeKey(cardKeyPair);
+            loadMasterKey();
+
+            byte[] cardId = {0x00, 0x00, 0x00, 0x01};
+            loadCertificate(cardId, (RSAPublicKey) cardKeyPair.getPublic());
+
+        } catch (Exception e) {
+            System.err.println("[MT] Error: " + e.getMessage());
+        } finally {
+            disconnect(false);
         }
+    }
 
-    public static void main(String[] args) {
-        MasterTerminal mt = new MasterTerminal();        
+    public static void main(String[] args) throws Exception {
+        MasterTerminal mt = new MasterTerminal();
         mt.startProcess();
     }
 }

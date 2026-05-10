@@ -29,6 +29,7 @@ public final class MembershipApplet extends Applet {
     private static final byte INS_BLOCK = (byte) 0x14; // Administrator Terminal (AT) blocks the member's account.
                                                                         //
     private static final byte INS_CHECKIN_T1 = (byte) 0x20; // Open-Access Terminal (OAT) checks in for Tier 1 facilities.
+                                                                        //
     private static final byte INS_T2_STEP1 = (byte) 0x21; // Controlled-Access Terminal (CAT) begins Tier 2 mutual authentication.
     private static final byte INS_T2_STEP2 = (byte) 0x22; // Controlled-Access Terminal (CAT) completes Tier 2 mutual authentication.
     private static final byte INS_GET_CERT = (byte) 0x60; // Any Terminal queries the card's certificate for offline PKI verification.
@@ -66,7 +67,7 @@ public final class MembershipApplet extends Applet {
     private MembershipApplet() {
         // JavaCard has no garbage collector; all allocations must be done once at install time.
         // The arrays below are persistent EEPROM objects and must never be replaced later.
-        currentState = STATE_INITIALIZE;
+        currentState = STATE_INITIALIZE; //not coherent with the docuement 
         dailyCounter = (byte) 0x00;
         lastDate = new byte[4];
         memberId = new byte[4];
