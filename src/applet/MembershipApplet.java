@@ -1,4 +1,4 @@
-package com.sports.recreation;
+package applet;
 
 import javacard.framework.APDU;
 import javacard.framework.Applet;
@@ -24,9 +24,12 @@ public final class MembershipApplet extends Applet {
     private static final byte INS_INITIALIZE_KEY = (byte) 0x10; // Master Terminal (MT) provisions the card's private key.
     private static final byte INS_LOAD_CERT = (byte) 0x11; // Master Terminal (MT) loads the Master-signed certificate.
     private static final byte INS_LOAD_MASTER_KEY = (byte) 0x12; // Master Terminal (MT) loads the Master public key.
+                                                                        //
     private static final byte INS_ACTIVATE = (byte) 0x13; // Administrator Terminal (AT) activates the member's account.
     private static final byte INS_BLOCK = (byte) 0x14; // Administrator Terminal (AT) blocks the member's account.
+                                                                        //
     private static final byte INS_CHECKIN_T1 = (byte) 0x20; // Open-Access Terminal (OAT) checks in for Tier 1 facilities.
+                                                                        //
     private static final byte INS_T2_STEP1 = (byte) 0x21; // Controlled-Access Terminal (CAT) begins Tier 2 mutual authentication.
     private static final byte INS_T2_STEP2 = (byte) 0x22; // Controlled-Access Terminal (CAT) completes Tier 2 mutual authentication.
     private static final byte INS_GET_CERT = (byte) 0x60; // Any Terminal queries the card's certificate for offline PKI verification.
@@ -64,7 +67,7 @@ public final class MembershipApplet extends Applet {
     private MembershipApplet() {
         // JavaCard has no garbage collector; all allocations must be done once at install time.
         // The arrays below are persistent EEPROM objects and must never be replaced later.
-        currentState = STATE_INITIALIZE;
+        currentState = STATE_INITIALIZE; //not coherent with the docuement 
         dailyCounter = (byte) 0x00;
         lastDate = new byte[4];
         memberId = new byte[4];

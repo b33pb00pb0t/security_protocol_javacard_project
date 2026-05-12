@@ -6,8 +6,8 @@ JCARDSIM_VERSION="2.2.2"
 JAR_DIR="$ROOT_DIR/lib"
 JAR_PATH="$JAR_DIR/jcardsim-$JCARDSIM_VERSION.jar"
 OUT_DIR="$ROOT_DIR/.sim-build"
-APPLET_SRC="$ROOT_DIR/src/com/sports/recreation/MembershipApplet.java"
-HARNESS_SRC="$ROOT_DIR/simulator/RunMembershipSimulator.java"
+APPLET_SRC="$ROOT_DIR/src/applet/MembershipApplet.java"
+HARNESS_SRC="$ROOT_DIR/../simulator/RunMembershipSimulator.java"
 
 mkdir -p "$JAR_DIR" "$OUT_DIR"
 
