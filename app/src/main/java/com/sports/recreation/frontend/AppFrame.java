@@ -1,6 +1,7 @@
 package com.sports.recreation.frontend;
 
 import com.sports.recreation.backend.BlockListRepository;
+import com.sports.recreation.backend.CsvAuditLogger;
 import com.sports.recreation.backend.CsvBlockListRepository;
 import com.sports.recreation.backend.CsvMemberRepository;
 import com.sports.recreation.backend.JCardSimGateway;
@@ -22,9 +23,10 @@ public class AppFrame extends JFrame {
         CsvMemberRepository memberRepo = new CsvMemberRepository("members.csv");
         TerminalSyncService syncService = new TerminalSyncService(blockListRepo);
         JCardSimGateway cardGateway = new JCardSimGateway();
+        CsvAuditLogger auditLogger = new CsvAuditLogger("audit_log.csv");
 
-        this.authService = new AuthService();
-        this.terminalService = new ConnectedTerminalService(memberRepo, blockListRepo, syncService, cardGateway);
+        this.authService = new AuthService(auditLogger);
+        this.terminalService = new ConnectedTerminalService(memberRepo, blockListRepo, syncService, cardGateway, auditLogger);
 
         setTitle("Sports Recreation Center - Terminal Frontend");
         setSize(800, 560);

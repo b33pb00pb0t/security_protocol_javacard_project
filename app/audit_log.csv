@@ -1,0 +1,4 @@
+Timestamp,Terminal,MemberId,Action,Result,Message
+2026-05-19T10:47:00.084,AUTH,,LOGIN_ADMIN,SUCCESS,Admin login successful
+2026-05-19T10:47:05.081,ADMIN,000004D2,ACTIVATE,DENIED,ERROR: Initialize simulator card 000004D2 from the Master terminal first.
+2026-05-19T10:47:12.308,ADMIN,,VIEW_BLOCKED_CARDS,SUCCESS,--- Blocked Cards --- ID: 0000007B | Reported At: 2026-04-29T19:08:38.053

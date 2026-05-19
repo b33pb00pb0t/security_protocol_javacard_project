@@ -102,7 +102,7 @@ public class JCardSimGateway {
         CardSession session = requireSession(memberId);
         byte[] payload = new byte[8];
         System.arraycopy(CardId.toBytes(memberId), 0, payload, 0, 4);
-        System.arraycopy(dateBytes(currentDate), 0, payload, 4, 4);
+        System.arraycopy(ApduDateCodec.encode(currentDate), 0, payload, 4, 4);
         requireSuccess(transmit(session, INS_ACTIVATE, payload), "Card activation");
         session.appletActive = true;
     }
@@ -178,7 +178,7 @@ public class JCardSimGateway {
                 return CardAccessResult.denied("Card Tier 2 signature verification failed");
             }
 
-            byte[] date = dateBytes(currentDate);
+            byte[] date = ApduDateCodec.encode(currentDate);
             byte[] sigma2 = signWithTerminal(cardNonce, date);
             byte[] payload = new byte[203];
             System.arraycopy(sigma2, 0, payload, 0, 64);
@@ -306,20 +306,6 @@ public class JCardSimGateway {
         if (!response.isSuccess()) {
             throw new IllegalStateException(operation + " failed with SW=" + response.swHex());
         }
-    }
-
-    private byte[] dateBytes(LocalDate date) {
-        int year = date.getYear();
-        return new byte[] {
-                toBcd(year / 100),
-                toBcd(year % 100),
-                toBcd(date.getMonthValue()),
-                toBcd(date.getDayOfMonth())
-        };
-    }
-
-    private byte toBcd(int value) {
-        return (byte) (((value / 10) << 4) | (value % 10));
     }
 
     private static byte[] toFixedByteArray(BigInteger value, int length) {

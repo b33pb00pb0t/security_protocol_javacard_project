@@ -1,6 +1,8 @@
 package com.sports.recreation.frontend;
 
 import com.sports.recreation.backend.BlockListRepository;
+import com.sports.recreation.backend.AuditEvent;
+import com.sports.recreation.backend.CsvAuditLogger;
 import com.sports.recreation.backend.CsvBlockListRepository;
 import com.sports.recreation.backend.CsvMemberRepository;
 import com.sports.recreation.backend.JCardSimGateway;
@@ -10,6 +12,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
+import java.util.List;
 
 import static org.junit.Assert.assertTrue;
 
@@ -103,6 +106,31 @@ public class ConnectedTerminalServiceTest {
         assertContains(service.checkInTier1("7777"), "ACCESS DENIED");
     }
 
+    @Test
+    public void terminalActionsWriteAuditEvents() throws Exception {
+        File membersFile = temporaryFolder.newFile("members.csv");
+        File blockedFile = temporaryFolder.newFile("blocked_cards.csv");
+        File auditFile = temporaryFolder.newFile("audit_log.csv");
+        CsvMemberRepository memberRepository = new CsvMemberRepository(membersFile.getAbsolutePath());
+        BlockListRepository blockListRepository = new CsvBlockListRepository(blockedFile.getAbsolutePath());
+        CsvAuditLogger auditLogger = new CsvAuditLogger(auditFile.getAbsolutePath());
+        ConnectedTerminalService service = new ConnectedTerminalService(memberRepository, blockListRepository,
+                new TerminalSyncService(blockListRepository), new JCardSimGateway(), auditLogger);
+
+        service.initializeCard("8888");
+        service.activateCard("8888", "20991231", "555");
+        service.checkInTier1("8888");
+        service.blockCard("8888");
+        service.checkInTier1("8888");
+
+        List<AuditEvent> events = auditLogger.readAll();
+        assertContains(joinEvents(events), "MASTER|000022B8|INITIALIZE|SUCCESS");
+        assertContains(joinEvents(events), "ADMIN|000022B8|ACTIVATE|SUCCESS");
+        assertContains(joinEvents(events), "ACCESS|000022B8|CHECK_IN_T1|SUCCESS");
+        assertContains(joinEvents(events), "ADMIN|000022B8|BLOCK|SUCCESS");
+        assertContains(joinEvents(events), "ACCESS|000022B8|CHECK_IN_T1|DENIED");
+    }
+
     private ConnectedTerminalService newService() throws Exception {
         File membersFile = temporaryFolder.newFile("members.csv");
         File blockedFile = temporaryFolder.newFile("blocked_cards.csv");
@@ -114,5 +142,16 @@ public class ConnectedTerminalServiceTest {
 
     private void assertContains(String actual, String expected) {
         assertTrue("Expected [" + actual + "] to contain [" + expected + "]", actual.contains(expected));
+    }
+
+    private String joinEvents(List<AuditEvent> events) {
+        StringBuilder builder = new StringBuilder();
+        for (AuditEvent event : events) {
+            builder.append(event.getTerminal()).append('|')
+                    .append(event.getMemberId()).append('|')
+                    .append(event.getAction()).append('|')
+                    .append(event.getResult()).append('\n');
+        }
+        return builder.toString();
     }
 }
