@@ -25,7 +25,7 @@
             <artifactId>jcardsim</artifactId>
             <version>local</version>
             <scope>system</scope>
-            <systemPath>${project.basedir}/../Sports_Center/lib/jcardsim-2.2.2.jar</systemPath>
+            <systemPath>${project.basedir}/../lib/jcardsim.jar.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>junit</groupId>
@@ -56,7 +56,7 @@
                 <configuration>
                     <mainClass>com.sports.recreation.frontend.Main</mainClass>
                     <additionalClasspathElements>
-                        <additionalClasspathElement>${project.basedir}/../Sports_Center/lib/jcardsim-2.2.2.jar</additionalClasspathElement>
+                        <additionalClasspathElement>${project.basedir}/../lib/jcardsim.jar.jar</additionalClasspathElement>
                     </additionalClasspathElements>
                 </configuration>
             </plugin>

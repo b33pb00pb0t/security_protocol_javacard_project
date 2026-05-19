@@ -16,28 +16,30 @@
         </not>
     </condition>
 
-    <property name="jckit.version" value="3.1.0"/>
-
     <fail unless="jckit.path"
           message="Set -Djc.home=/path/to/javacard-sdk or export JC_HOME=/path/to/javacard-sdk before building."/>
 
-    <condition property="sdk.available">
-        <available file="${jckit.path}/lib/api_classic-3.1.0.jar"/>
-    </condition>
+    <path id="jc.api.path">
+        <fileset dir="${jckit.path}/lib" includes="api_classic*.jar"/>
+    </path>
 
-    <fail unless="sdk.available"
-          message="JavaCard SDK ${jckit.version} not found at ${jckit.path}; expected lib/api_classic-3.1.0.jar."/>
+    <path id="project.classpath">
+        <path refid="jc.api.path"/>
+        <fileset dir="lib" includes="*.jar"/>
+    </path>
 
-    <property name="api.jar" value="${jckit.path}/lib/api_classic-3.1.0.jar"/>
-
+    <!-- Configurazione Percorsi -->
     <property name="src.dir" value="src"/>
+    <property name="simulator.dir" value="simulator"/>
     <property name="build.dir" value="build"/>
     <property name="dist.dir" value="dist"/>
     <property name="classes.dir" value="${build.dir}/classes"/>
-    <property name="package.name" value="com.sports.recreation"/>
-    <property name="package.aid" value="A00000010203"/>
-    <property name="applet.aid" value="A0000001020301"/>
-    <property name="applet.class" value="com.sports.recreation.MembershipApplet"/>
+
+    <!-- Configurazione Applet e Package -->
+    <property name="package.name" value="applet"/> 
+    <property name="package.aid" value="A00000010203"/> <!-- AID del package (primi bytes)[cite: 8] -->
+    <property name="applet.aid" value="A0000001020301"/> <!-- AID completo dell'applet[cite: 8] -->
+    <property name="applet.class" value="applet.MembershipApplet"/> <!-- Deve corrispondere a src/applet/MembershipApplet.java[cite: 6, 8] -->
     <property name="cap.output" value="${dist.dir}/MembershipApplet.cap"/>
 
     <target name="init">
@@ -46,16 +48,18 @@
     </target>
 
     <target name="compile" depends="init">
-        <javac srcdir="${src.dir}"
-               destdir="${classes.dir}"
+        <javac destdir="${classes.dir}"
                includeantruntime="false"
-               classpath="${api.jar}"
                source="1.8"
-               target="1.8"/>
+               target="1.8">
+            <src path="${src.dir}"/>
+            <src path="${simulator.dir}"/>
+            <classpath refid="project.classpath"/>
+        </javac>
     </target>
 
     <target name="build" depends="compile">
-        <javacard jckit="${jckit.path}" source="1.8" target="1.8">
+        <javacard jckit="${jckit.path}" source="1.5" target="1.5">
             <cap aid="${package.aid}"
                  package="${package.name}"
                  version="1.0"
@@ -67,14 +71,17 @@
         </javacard>
     </target>
 
+    <target name="run-simulator" depends="compile">
+        <java classname="RunMembershipSimulator" fork="true">
+            <classpath>
+                <path refid="project.classpath"/>
+                <pathelement location="${classes.dir}"/>
+            </classpath>
+        </java>
+    </target>
+
     <target name="clean">
         <delete dir="${build.dir}"/>
         <delete dir="${dist.dir}"/>
-    </target>
-
-    <target name="help">
-        <echo message="Sports Center Membership JavaCard build"/>
-        <echo message="  ant -Djc.home=/path/to/javacard-sdk build"/>
-        <echo message="  ant -Djc.home=/path/to/javacard-sdk clean"/>
     </target>
 </project>
