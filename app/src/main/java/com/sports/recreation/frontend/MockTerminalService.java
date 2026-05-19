@@ -103,6 +103,11 @@ public class MockTerminalService implements TerminalService {
     }
 
     @Override
+    public String syncTerminals() {
+        return "Mock access terminals synced.";
+    }
+
+    @Override
     public String checkInTier1(String memberId) {
         if (adminService.isCardBlocked(memberId)) {
             return "ACCESS DENIED: Card " + memberId + " is BLOCKED.";

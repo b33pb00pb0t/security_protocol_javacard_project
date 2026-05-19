@@ -29,6 +29,8 @@ public class ConnectedTerminalServiceTest {
         assertContains(service.installCertificate("1234"), "Certificate installed");
         assertContains(service.loadIssuerData("1234"), "Issuer public data loaded");
         assertContains(service.activateCard("1234", "20991231", "+34123456789"), "activated");
+        assertContains(service.syncTerminals(), "Active cards: 1");
+        assertContains(service.readCardStatus("1234"), "AccessCache=SYNCED");
         assertContains(service.readCardStatus("1234"), "AppletActive=true");
         assertContains(service.checkInTier1("1234"), "ACCESS GRANTED");
         assertContains(service.checkInTier2("1234"), "DailyCounter=1");
@@ -43,12 +45,14 @@ public class ConnectedTerminalServiceTest {
         service.initializeCard("1234");
         service.activateCard("1234", "20991231", "555");
         assertContains(service.blockCard("1234"), "Block List");
+        assertContains(service.syncTerminals(), "Blocked cards: 1");
         assertContains(service.checkInTier1("1234"), "ACCESS DENIED");
 
         service.initializeCard("2222");
         service.activateCard("2222", "20991231", "555");
         assertContains(service.deactivateCard("2222"), "deactivated");
-        assertContains(service.checkInTier1("2222"), "INACTIVE");
+        assertContains(service.syncTerminals(), "Active cards: 0");
+        assertContains(service.checkInTier1("2222"), "Active List snapshot");
     }
 
     @Test
@@ -57,7 +61,8 @@ public class ConnectedTerminalServiceTest {
 
         service.initializeCard("3333");
         service.activateCard("3333", "20000101", "555");
-        assertContains(service.checkInTier1("3333"), "expired");
+        service.syncTerminals();
+        assertContains(service.checkInTier1("3333"), "Cached membership expired");
     }
 
     @Test
@@ -68,7 +73,24 @@ public class ConnectedTerminalServiceTest {
         assertContains(service.activateCard("4444", "20991231", "555"), "activated");
         assertContains(service.deactivateCard("4444"), "deactivated");
         assertContains(service.activateCard("4444", "20991231", "555"), "activated");
+        service.syncTerminals();
         assertContains(service.checkInTier1("4444"), "ACCESS GRANTED");
+    }
+
+    @Test
+    public void accessTerminalUsesLastSyncedSnapshotUntilNextSync() throws Exception {
+        ConnectedTerminalService service = newService();
+
+        service.initializeCard("6666");
+        service.activateCard("6666", "20991231", "555");
+        service.syncTerminals();
+        assertContains(service.checkInTier1("6666"), "ACCESS GRANTED");
+
+        service.deactivateCard("6666");
+        assertContains(service.checkInTier1("6666"), "ACCESS GRANTED");
+
+        service.syncTerminals();
+        assertContains(service.checkInTier1("6666"), "Active List snapshot");
     }
 
     @Test
@@ -89,8 +111,10 @@ public class ConnectedTerminalServiceTest {
                 new TerminalSyncService(reloadedBlockList), new JCardSimGateway());
 
         assertContains(reloadedService.initializeCard("5555"), "000015B3");
+        reloadedService.syncTerminals();
         assertContains(reloadedService.checkInTier1("5555"), "not active in this app run");
         assertContains(reloadedService.activateCard("5555", "20991231", "555"), "activated");
+        reloadedService.syncTerminals();
         assertContains(reloadedService.checkInTier1("5555"), "ACCESS GRANTED");
     }
 
@@ -103,6 +127,7 @@ public class ConnectedTerminalServiceTest {
         assertContains(service.renewMembership("7777", "20991231"), "20991231");
         assertContains(service.blockCard("7777"), "00001E61");
         assertContains(service.viewBlockedCards(), "00001E61");
+        service.syncTerminals();
         assertContains(service.checkInTier1("7777"), "ACCESS DENIED");
     }
 
@@ -119,13 +144,16 @@ public class ConnectedTerminalServiceTest {
 
         service.initializeCard("8888");
         service.activateCard("8888", "20991231", "555");
+        service.syncTerminals();
         service.checkInTier1("8888");
         service.blockCard("8888");
+        service.syncTerminals();
         service.checkInTier1("8888");
 
         List<AuditEvent> events = auditLogger.readAll();
         assertContains(joinEvents(events), "MASTER|000022B8|INITIALIZE|SUCCESS");
         assertContains(joinEvents(events), "ADMIN|000022B8|ACTIVATE|SUCCESS");
+        assertContains(joinEvents(events), "ACCESS||SYNC_TERMINALS|SUCCESS");
         assertContains(joinEvents(events), "ACCESS|000022B8|CHECK_IN_T1|SUCCESS");
         assertContains(joinEvents(events), "ADMIN|000022B8|BLOCK|SUCCESS");
         assertContains(joinEvents(events), "ACCESS|000022B8|CHECK_IN_T1|DENIED");

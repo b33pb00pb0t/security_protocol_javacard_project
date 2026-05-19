@@ -27,6 +27,8 @@ public interface TerminalService {
 
     String loadIssuerData(String memberId);
 
+    String syncTerminals();
+
     String checkInTier1(String memberId);
 
     String checkInTier2(String memberId);

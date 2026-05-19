@@ -35,12 +35,14 @@ public class AccessPanel extends JPanel {
         formPanel.add(new JLabel("Member ID:"));
         formPanel.add(memberIdField);
 
-        JPanel buttonPanel = new JPanel(new GridLayout(2, 2, 8, 8));
+        JPanel buttonPanel = new JPanel(new GridLayout(3, 2, 8, 8));
+        JButton syncButton = new JButton("Sync Terminals");
         JButton tier1Button = new JButton("Tier 1 Check-In");
         JButton tier2Button = new JButton("Tier 2 Check-In");
         JButton statusButton = new JButton("Read Card Status");
         JButton logoutButton = new JButton("Logout");
 
+        buttonPanel.add(syncButton);
         buttonPanel.add(tier1Button);
         buttonPanel.add(tier2Button);
         buttonPanel.add(statusButton);
@@ -59,6 +61,7 @@ public class AccessPanel extends JPanel {
         add(centerPanel, BorderLayout.CENTER);
         add(scrollPane, BorderLayout.SOUTH);
 
+        syncButton.addActionListener(e -> log(terminalService.syncTerminals()));
         tier1Button.addActionListener(e -> log(terminalService.checkInTier1(getMemberId())));
         tier2Button.addActionListener(e -> log(terminalService.checkInTier2(getMemberId())));
         statusButton.addActionListener(e -> log(terminalService.readCardStatus(getMemberId())));

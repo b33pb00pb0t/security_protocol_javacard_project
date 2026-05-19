@@ -7,6 +7,8 @@ import com.sports.recreation.backend.AuditLogger;
 import com.sports.recreation.backend.JCardSimGateway;
 import com.sports.recreation.backend.MemberRecord;
 import com.sports.recreation.backend.NoOpAuditLogger;
+import com.sports.recreation.backend.TerminalOfflineCache;
+import com.sports.recreation.backend.TerminalOfflineSnapshot;
 import com.sports.recreation.backend.TerminalSyncService;
 
 import java.time.LocalDate;
@@ -18,12 +20,14 @@ public class ConnectedTerminalService implements TerminalService {
     private final TerminalSyncService syncService;
     private final JCardSimGateway cardGateway;
     private final AuditLogger auditLogger;
+    private final TerminalOfflineCache terminalCache;
 
     public ConnectedTerminalService(CsvMemberRepository memberRepository,
                                     BlockListRepository blockListRepository,
                                     TerminalSyncService syncService,
                                     JCardSimGateway cardGateway) {
-        this(memberRepository, blockListRepository, syncService, cardGateway, new NoOpAuditLogger());
+        this(memberRepository, blockListRepository, syncService, cardGateway, new NoOpAuditLogger(),
+                new TerminalOfflineCache());
     }
 
     public ConnectedTerminalService(CsvMemberRepository memberRepository,
@@ -31,11 +35,22 @@ public class ConnectedTerminalService implements TerminalService {
                                     TerminalSyncService syncService,
                                     JCardSimGateway cardGateway,
                                     AuditLogger auditLogger) {
+        this(memberRepository, blockListRepository, syncService, cardGateway, auditLogger,
+                new TerminalOfflineCache());
+    }
+
+    public ConnectedTerminalService(CsvMemberRepository memberRepository,
+                                    BlockListRepository blockListRepository,
+                                    TerminalSyncService syncService,
+                                    JCardSimGateway cardGateway,
+                                    AuditLogger auditLogger,
+                                    TerminalOfflineCache terminalCache) {
         this.memberRepository = memberRepository;
         this.blockListRepository = blockListRepository;
         this.syncService = syncService;
         this.cardGateway = cardGateway;
         this.auditLogger = auditLogger;
+        this.terminalCache = terminalCache;
     }
 
     @Override
@@ -133,6 +148,7 @@ public class ConnectedTerminalService implements TerminalService {
             builder.append(" | Blocked=").append(blockListRepository.isBlocked(normalized));
             builder.append(" | SimulatorSession=").append(cardGateway.hasSession(normalized));
             builder.append(" | AppletActive=").append(cardGateway.isAppletActive(normalized));
+            builder.append(" | AccessCache=").append(terminalCache.getSnapshot().isSynced() ? "SYNCED" : "NOT_SYNCED");
             return finish("ADMIN", normalized, "READ_STATUS", true, builder.toString());
         } catch (Exception e) {
             return finish("ADMIN", memberId, "READ_STATUS", false, "ERROR: " + e.getMessage());
@@ -229,6 +245,16 @@ public class ConnectedTerminalService implements TerminalService {
     }
 
     @Override
+    public String syncTerminals() {
+        try {
+            TerminalOfflineSnapshot snapshot = terminalCache.sync(memberRepository.findAll(), syncService.syncBlockList());
+            return finish("ACCESS", "", "SYNC_TERMINALS", true, snapshot.describe());
+        } catch (Exception e) {
+            return finish("ACCESS", "", "SYNC_TERMINALS", false, "ERROR: " + e.getMessage());
+        }
+    }
+
+    @Override
     public String checkInTier1(String memberId) {
         return checkIn(memberId, false);
     }
@@ -260,18 +286,19 @@ public class ConnectedTerminalService implements TerminalService {
     }
 
     private String validateAccessPolicy(String normalized) {
-        if (blockListRepository.isBlocked(normalized)) {
-            return "Card is in the backend Block List.";
+        TerminalOfflineSnapshot snapshot = terminalCache.getSnapshot();
+        if (!snapshot.isSynced()) {
+            return "Access terminal cache is not synced. Press Sync Terminals first.";
         }
-        MemberRecord record = memberRepository.find(normalized);
+        if (snapshot.isBlocked(normalized)) {
+            return "Card is in the access terminal Block List snapshot.";
+        }
+        MemberRecord record = snapshot.findActiveMember(normalized);
         if (record == null) {
-            return "Card is not present in the backend Active List.";
-        }
-        if (!MemberRecord.STATUS_ACTIVE.equals(record.getStatus())) {
-            return "Backend status is " + record.getStatus() + ".";
+            return "Card is not present in the access terminal Active List snapshot.";
         }
         if (record.isExpiredOn(LocalDate.now())) {
-            return "Membership expired on " + record.getExpiryDate() + ".";
+            return "Cached membership expired on " + record.getExpiryDate() + ".";
         }
         if (!cardGateway.hasSession(normalized)) {
             return "Simulator card session does not exist. Initialize it in this app run first.";
