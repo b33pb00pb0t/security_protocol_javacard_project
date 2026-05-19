@@ -14,6 +14,27 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <dependencies>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk15on</artifactId>
+            <version>1.70</version>
+        </dependency>
+        <dependency>
+            <groupId>com.licel</groupId>
+            <artifactId>jcardsim</artifactId>
+            <version>local</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/../Sports_Center/lib/jcardsim-2.2.2.jar</systemPath>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.13.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
     <build>
         <plugins>
             <plugin>
@@ -23,6 +44,9 @@
                 <configuration>
                     <source>${maven.compiler.source}</source>
                     <target>${maven.compiler.target}</target>
+                    <excludes>
+                        <exclude>terminals/**</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
             <plugin>
@@ -31,6 +55,9 @@
                 <version>3.1.0</version>
                 <configuration>
                     <mainClass>com.sports.recreation.frontend.Main</mainClass>
+                    <additionalClasspathElements>
+                        <additionalClasspathElement>${project.basedir}/../Sports_Center/lib/jcardsim-2.2.2.jar</additionalClasspathElement>
+                    </additionalClasspathElements>
                 </configuration>
             </plugin>
         </plugins>

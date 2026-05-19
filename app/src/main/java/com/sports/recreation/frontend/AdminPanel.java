@@ -9,6 +9,7 @@ public class AdminPanel extends JPanel {
 
     private final JTextField memberIdField;
     private final JTextField expiryDateField;
+    private final JTextField phoneField;
     private final JTextArea outputArea;
 
     public AdminPanel(AppFrame appFrame, TerminalService terminalService) {
@@ -21,14 +22,17 @@ public class AdminPanel extends JPanel {
         title.setFont(new Font("Arial", Font.BOLD, 22));
         add(title, BorderLayout.NORTH);
 
-        JPanel formPanel = new JPanel(new GridLayout(2, 2, 8, 8));
+        JPanel formPanel = new JPanel(new GridLayout(3, 2, 8, 8));
         memberIdField = new JTextField();
         expiryDateField = new JTextField("20261231");
+        phoneField = new JTextField();
 
         formPanel.add(new JLabel("Member ID:"));
         formPanel.add(memberIdField);
         formPanel.add(new JLabel("Expiry Date (YYYYMMDD):"));
         formPanel.add(expiryDateField);
+        formPanel.add(new JLabel("Phone:"));
+        formPanel.add(phoneField);
 
         JPanel buttonPanel = new JPanel(new GridLayout(4, 2, 8, 8));
 
@@ -63,7 +67,7 @@ public class AdminPanel extends JPanel {
         add(scrollPane, BorderLayout.SOUTH);
 
         activateButton.addActionListener(e ->
-                log(terminalService.activateCard(getMemberId(), expiryDateField.getText())));
+                log(terminalService.activateCard(getMemberId(), expiryDateField.getText(), phoneField.getText())));
 
         deactivateButton.addActionListener(e ->
                 log(terminalService.deactivateCard(getMemberId())));

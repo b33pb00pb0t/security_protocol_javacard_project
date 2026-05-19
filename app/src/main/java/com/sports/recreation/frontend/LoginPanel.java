@@ -46,6 +46,9 @@ public class LoginPanel extends JPanel {
         } else if (role == AuthService.Role.MASTER) {
             passwordField.setText("");
             appFrame.showMaster();
+        } else if (role == AuthService.Role.ACCESS) {
+            passwordField.setText("");
+            appFrame.showAccess();
         } else {
             messageLabel.setText("Invalid password.");
         }

@@ -4,6 +4,7 @@ public class AuthService {
     public enum Role {
         ADMIN,
         MASTER,
+        ACCESS,
         INVALID
     }
 
@@ -14,6 +15,10 @@ public class AuthService {
 
         if ("master123".equals(password)) {
             return Role.MASTER;
+        }
+
+        if ("access123".equals(password)) {
+            return Role.ACCESS;
         }
 
         return Role.INVALID;

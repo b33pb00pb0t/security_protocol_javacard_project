@@ -95,9 +95,6 @@ public class CsvBlockListRepository implements BlockListRepository {
     }
 
     private String normalize(String idc) {
-        if (idc == null || idc.trim().isEmpty()) {
-            throw new IllegalArgumentException("IDC cannot be empty");
-        }
-        return idc.trim().toUpperCase();
+        return CardId.normalize(idc);
     }
 }

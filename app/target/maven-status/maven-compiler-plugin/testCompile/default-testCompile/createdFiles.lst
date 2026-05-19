@@ -1,0 +1,5 @@
+com\sports\recreation\frontend\ConnectedTerminalServiceTest.class
+com\sports\recreation\backend\CardIdTest.class
+com\sports\recreation\backend\CsvMemberRepositoryTest.class
+com\sports\recreation\frontend\AuthServiceTest.class
+com\sports\recreation\backend\JCardSimGatewayTest.class

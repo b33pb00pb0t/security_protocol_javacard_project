@@ -2,7 +2,8 @@ package com.sports.recreation.frontend;
 
 import com.sports.recreation.backend.BlockListRepository;
 import com.sports.recreation.backend.CsvBlockListRepository;
-import com.sports.recreation.backend.MembershipAdminService;
+import com.sports.recreation.backend.CsvMemberRepository;
+import com.sports.recreation.backend.JCardSimGateway;
 import com.sports.recreation.backend.TerminalSyncService;
 
 import javax.swing.JFrame;
@@ -18,14 +19,15 @@ public class AppFrame extends JFrame {
 
     public AppFrame() {
         BlockListRepository blockListRepo = new CsvBlockListRepository("blocked_cards.csv");
-        MembershipAdminService adminService = new MembershipAdminService(blockListRepo);
+        CsvMemberRepository memberRepo = new CsvMemberRepository("members.csv");
         TerminalSyncService syncService = new TerminalSyncService(blockListRepo);
+        JCardSimGateway cardGateway = new JCardSimGateway();
 
         this.authService = new AuthService();
-        this.terminalService = new MockTerminalService(adminService, syncService);
+        this.terminalService = new ConnectedTerminalService(memberRepo, blockListRepo, syncService, cardGateway);
 
         setTitle("Sports Recreation Center - Terminal Frontend");
-        setSize(700, 500);
+        setSize(800, 560);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
@@ -35,6 +37,7 @@ public class AppFrame extends JFrame {
         rootPanel.add(new LoginPanel(this, authService), "LOGIN");
         rootPanel.add(new AdminPanel(this, terminalService), "ADMIN");
         rootPanel.add(new MasterPanel(this, terminalService), "MASTER");
+        rootPanel.add(new AccessPanel(this, terminalService), "ACCESS");
 
         add(rootPanel);
         showLogin();
@@ -50,5 +53,9 @@ public class AppFrame extends JFrame {
 
     public void showMaster() {
         cardLayout.show(rootPanel, "MASTER");
+    }
+
+    public void showAccess() {
+        cardLayout.show(rootPanel, "ACCESS");
     }
 }

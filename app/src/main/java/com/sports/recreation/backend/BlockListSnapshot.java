@@ -14,7 +14,7 @@ public class BlockListSnapshot {
         this.version = version;
         this.blockedCardsData = new HashMap<>();
         for (String id : blockedCards) {
-            this.blockedCardsData.put(id.trim().toUpperCase(), "Unknown");
+            this.blockedCardsData.put(CardId.normalize(id), "Unknown");
         }
     }
 
@@ -28,7 +28,7 @@ public class BlockListSnapshot {
     }
 
     public boolean contains(String idc) {
-        return blockedCardsData.containsKey(idc.trim().toUpperCase());
+        return blockedCardsData.containsKey(CardId.normalize(idc));
     }
 
     public Set<String> getBlockedCards() {

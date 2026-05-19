@@ -70,7 +70,7 @@ public class MasterPanel extends JPanel {
                 log(terminalService.installCertificate(getMemberId())));
 
         issuerButton.addActionListener(e ->
-                log(terminalService.loadIssuerData()));
+                log(terminalService.loadIssuerData(getMemberId())));
 
         statusButton.addActionListener(e ->
                 log(terminalService.readCardStatus(getMemberId())));

@@ -16,10 +16,16 @@ public class MockTerminalService implements TerminalService {
 
     @Override
     public String activateCard(String memberId, String expiryDate) {
+        return activateCard(memberId, expiryDate, "");
+    }
+
+    @Override
+    public String activateCard(String memberId, String expiryDate, String phoneNumber) {
         if (adminService.isCardBlocked(memberId)) {
             return "ERROR: Card " + memberId + " is BLOCKED. Cannot activate.";
         }
-        return "Card " + memberId + " activated until " + expiryDate;
+        return "Card " + memberId + " activated until " + expiryDate
+                + (phoneNumber == null || phoneNumber.trim().isEmpty() ? "" : " with phone " + phoneNumber);
     }
 
     @Override
@@ -89,5 +95,26 @@ public class MockTerminalService implements TerminalService {
     @Override
     public String loadIssuerData() {
         return "Issuer public data loaded.";
+    }
+
+    @Override
+    public String loadIssuerData(String memberId) {
+        return "Issuer public data loaded for " + memberId + ".";
+    }
+
+    @Override
+    public String checkInTier1(String memberId) {
+        if (adminService.isCardBlocked(memberId)) {
+            return "ACCESS DENIED: Card " + memberId + " is BLOCKED.";
+        }
+        return "ACCESS GRANTED: Tier 1 mock check-in for " + memberId;
+    }
+
+    @Override
+    public String checkInTier2(String memberId) {
+        if (adminService.isCardBlocked(memberId)) {
+            return "ACCESS DENIED: Card " + memberId + " is BLOCKED.";
+        }
+        return "ACCESS GRANTED: Tier 2 mock check-in for " + memberId;
     }
 }

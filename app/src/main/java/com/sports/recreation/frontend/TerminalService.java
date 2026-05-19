@@ -3,6 +3,8 @@ package com.sports.recreation.frontend;
 public interface TerminalService {
     String activateCard(String memberId, String expiryDate);
 
+    String activateCard(String memberId, String expiryDate, String phoneNumber);
+
     String deactivateCard(String memberId);
 
     String renewMembership(String memberId, String newExpiryDate);
@@ -22,4 +24,10 @@ public interface TerminalService {
     String installCertificate(String memberId);
 
     String loadIssuerData();
+
+    String loadIssuerData(String memberId);
+
+    String checkInTier1(String memberId);
+
+    String checkInTier2(String memberId);
 }
