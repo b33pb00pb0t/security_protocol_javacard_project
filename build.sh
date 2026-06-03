@@ -1,18 +1,25 @@
 #!/bin/bash
 set -euo pipefail
 
-if [[ -n "${1:-}" ]]; then
-    export JC_HOME="$1"
+# 1. Compile JavaCard Applet
+if [[ -n "${JC_HOME:-}" ]]; then
+    echo "Building JavaCard Applet..."
+    ant -f build.xml -Djc.home="$JC_HOME" build
+else
+    echo "Warning: JC_HOME not set, skipping JavaCard Applet build"
 fi
 
-if [[ -z "${JC_HOME:-}" ]]; then
-    echo "Usage: ./build.sh /path/to/javacard-sdk"
-    exit 1
-fi
+# 2. Compile Java System
+echo "Compiling system Java sources..."
+# Creates 'build' folder for compiled .class files
+mkdir -p build
+# Uses semicolon ';' for Windows classpath, colon ':' for Linux
+# Since you are in Git Bash, sometimes it accepts ':', but ';' is safer for Windows Java
+javac -cp ".;lib/*" -d build \
+    src/applet/*.java \
+    src/backend/*.java \
+    src/frontend/*.java \
+    src/terminals/*.java \
+    simulator/*.java
 
-if [[ ! -f "$JC_HOME/lib/api_classic.jar" ]]; then
-    echo "JavaCard SDK not found at: $JC_HOME"
-    exit 1
-fi
-
-ant -f build.xml -Djc.home="$JC_HOME" build
+echo "Build completed successfully."
