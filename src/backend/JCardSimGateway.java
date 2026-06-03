@@ -98,11 +98,12 @@ public class JCardSimGateway {
         }
     }
 
-    public synchronized void activate(String memberId, LocalDate currentDate) {
+    public synchronized void activate(String memberId, LocalDate currentDate, LocalDate expiryDate) {
         CardSession session = requireSession(memberId);
-        byte[] payload = new byte[8];
+        byte[] payload = new byte[12];
         System.arraycopy(CardId.toBytes(memberId), 0, payload, 0, 4);
         System.arraycopy(ApduDateCodec.encode(currentDate), 0, payload, 4, 4);
+        System.arraycopy(ApduDateCodec.encode(expiryDate), 0, payload, 8, 4);
         requireSuccess(transmit(session, INS_ACTIVATE, payload), "Card activation");
         session.appletActive = true;
     }

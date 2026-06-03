@@ -1,17 +1,21 @@
-#!/bin/bash
-# Build and execution script for the Sports Center project
+#!/usr/bin/env bash
+# Build and execution script for the Sports Center project.
 # Usage: ./run.sh [simulator|frontend]
 
-# Exit immediately if a command exits with a non-zero status
-set -e
+set -euo pipefail
+
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) CP_SEP=";" ;;
+    *) CP_SEP=":" ;;
+esac
+
+BUILD_DIR="build"
+CLASSPATH="${BUILD_DIR}${CP_SEP}lib/*"
 
 echo "--- Starting Build Process ---"
+mkdir -p "$BUILD_DIR"
 
-# Create the build directory if it doesn't exist
-mkdir -p build
-
-# Compile all Java sources with Java 8 compatibility to avoid version mismatch
-javac -source 8 -target 8 -cp "build;lib/*" -d build \
+javac -source 8 -target 8 -cp "$CLASSPATH" -d "$BUILD_DIR" \
     src/applet/*.java \
     src/backend/*.java \
     src/frontend/*.java \
@@ -20,20 +24,18 @@ javac -source 8 -target 8 -cp "build;lib/*" -d build \
 
 echo "--- Build Completed Successfully ---"
 
-# Handle execution based on the provided argument
 case "${1:-}" in
     simulator)
         echo "Launching Membership Simulator..."
-        java -cp "build;lib/*" RunMembershipSimulator
+        java -cp "$CLASSPATH" RunMembershipSimulator
         ;;
     frontend)
         echo "Launching Frontend..."
-        # Note: Replace 'frontend.Main' with the actual class name containing your main method
-        java -cp "build;lib/*" frontend.Main
+        java -cp "$CLASSPATH" frontend.Main
         ;;
     *)
         echo "Usage: ./run.sh [simulator|frontend]"
-        echo "  simulator   -> Run the Membership Simulator"
-        echo "  frontend -> Run the Frontend application"
+        echo "  simulator -> Run the Membership Simulator"
+        echo "  frontend  -> Run the Swing Frontend application"
         ;;
 esac

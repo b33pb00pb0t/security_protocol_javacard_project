@@ -60,6 +60,7 @@ public final class MembershipApplet extends Applet {
     // Transient buffers for session data
     private byte[] transientNc; // Stores nonces temporarily
     private byte[] transientCertSig; 
+    private byte[] transientAuthData;
 
     /*
      * The Terminal sends a request.
@@ -96,6 +97,7 @@ public final class MembershipApplet extends Applet {
         // Transient arrays in RAM (automatically cleared on deselect)
         transientNc = JCSystem.makeTransientByteArray((short) 16, JCSystem.CLEAR_ON_DESELECT);
         transientCertSig = JCSystem.makeTransientByteArray((short) 64, JCSystem.CLEAR_ON_DESELECT);
+        transientAuthData = JCSystem.makeTransientByteArray((short) 20, JCSystem.CLEAR_ON_DESELECT);
     }   
 
     @Override
@@ -365,43 +367,52 @@ public final class MembershipApplet extends Applet {
         byte[] buffer = apdu.getBuffer();
         short bytesRead = apdu.setIncomingAndReceive();
 
-        // Assumption: Terminal sends the signature of the card's challenge (transientNc), the signature length (64 bytes) should match RSA algorithm
-        if (bytesRead < (short) 64) 
+        // Payload: Sigma2(64) + Cert_T(71) + Sigma1_MT(64) + Date(4)
+        if (bytesRead != (short) 203)
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
 
-        // 2. Mutual Authentication: Verify the terminal signature
-        // The terminal must sign the 'transientNc' generated in Step 1
-        verifier.init(terminalPublicKey, Signature.MODE_VERIFY);
-        
-        // We verify transientNc against the signature provided by the terminal (in the APDU buffer)
-        if (!verifier.verify(transientNc, (short) 0, (short) 16, 
-                            buffer, ISO7816.OFFSET_CDATA, (short) 64)) {
-            // If verification fails the terminal is not authorized (Fake reader attack)
+        short sigma2Offset = ISO7816.OFFSET_CDATA;
+        short certTOffset = (short) (ISO7816.OFFSET_CDATA + 64);
+        short sigma1Offset = (short) (ISO7816.OFFSET_CDATA + 135);
+        short dateOffset = (short) (ISO7816.OFFSET_CDATA + 199);
+
+        // Verify the terminal certificate using the master public key, then load PK_T.
+        verifier.init(masterPublicKey, Signature.MODE_VERIFY);
+        if (!verifier.verify(buffer, certTOffset, (short) 71, buffer, sigma1Offset, (short) 64)) {
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
 
-        // 3. Business Logic: Expiry and Counter
-        // Check Subscription Expiry: If today > expiryDate, card is invalid
-        if (Util.arrayCompare(buffer, (short)(ISO7816.OFFSET_CDATA + 64), expiryDate, (short) 0, (short) 4) > 0) {
+        terminalPublicKey.setModulus(buffer, (short) (certTOffset + 4), (short) 64);
+        terminalPublicKey.setExponent(buffer, (short) (certTOffset + 68), (short) 3);
+
+        // Verify Sigma2 over NC || Date, proving that the terminal owns SK_T.
+        Util.arrayCopy(transientNc, (short) 0, transientAuthData, (short) 0, (short) 16);
+        Util.arrayCopy(buffer, dateOffset, transientAuthData, (short) 16, (short) 4);
+        verifier.init(terminalPublicKey, Signature.MODE_VERIFY);
+        if (!verifier.verify(transientAuthData, (short) 0, (short) 20, buffer, sigma2Offset, (short) 64)) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+
+        // Check subscription expiry. If today > expiryDate, the card becomes inactive.
+        if (Util.arrayCompare(buffer, dateOffset, expiryDate, (short) 0, (short) 4) > 0) {
             JCSystem.beginTransaction();
             currentState = STATE_INACTIVE;
             JCSystem.commitTransaction();
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
 
-        // 4. Atomic Counter Update, only update the counter if the terminal is verified and valid.
+        short dateCmp = Util.arrayCompare(buffer, dateOffset, lastDate, (short) 0, (short) 4);
+        if (dateCmp == (short) 0 && (dailyCounter & 0xFF) >= 2) {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+
+        // Atomic counter update after the terminal is verified and the date is valid.
         JCSystem.beginTransaction();
         try {
-            short dateCmp = Util.arrayCompare(buffer, (short)(ISO7816.OFFSET_CDATA + 64), lastDate, (short) 0, (short) 4);
-            
             if (dateCmp != (short) 0) {
-                // New day detected: Update date and reset counter
-                Util.arrayCopy(buffer, (short)(ISO7816.OFFSET_CDATA + 64), lastDate, (short) 0, (short) 4);
+                Util.arrayCopy(buffer, dateOffset, lastDate, (short) 0, (short) 4);
                 dailyCounter = (byte) 0x01;
             } else {
-                // Same day: check limits (max 2 accesses)
-                if ((dailyCounter & 0xFF) >= 2) 
-                    ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
                 dailyCounter++;
             }
             JCSystem.commitTransaction();

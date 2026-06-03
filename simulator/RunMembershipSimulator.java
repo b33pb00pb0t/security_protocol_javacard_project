@@ -123,10 +123,11 @@ public final class RunMembershipSimulator {
     // --- ADMIN TERMINAL LOGIC (Adapted from Source 2) ---
     private static void runAdminActivate(Simulator sim) {
         System.out.println("\n[AT] Activating Card...");
-        // Payload: Member ID (4 bytes) + Date (4 bytes)[cite: 1, 2]
+        // Payload: Member ID (4 bytes) + activation date (4 bytes) + expiry date (4 bytes)
         byte[] payload = {
             0x00, 0x00, 0x04, (byte)0xD2, // ID 1234
-            0x20, 0x26, 0x05, 0x03        // Date 2026-05-03
+            0x20, 0x26, 0x06, 0x03,       // Activation date 2026-06-03
+            0x20, 0x26, 0x12, 0x31        // Expiry date 2026-12-31
         };
         sendCommand(sim, (byte)0x13, payload, "Card Activation");
     }

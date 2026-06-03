@@ -12,9 +12,13 @@ import backend.TerminalOfflineSnapshot;
 import backend.TerminalSyncService;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Map;
 
 public class ConnectedTerminalService implements TerminalService {
+    private static final DateTimeFormatter EXPIRY_FORMAT = DateTimeFormatter.BASIC_ISO_DATE;
+
     private final CsvMemberRepository memberRepository;
     private final BlockListRepository blockListRepository;
     private final TerminalSyncService syncService;
@@ -71,8 +75,9 @@ public class ConnectedTerminalService implements TerminalService {
                         "ERROR: Initialize simulator card " + normalized + " from the Master terminal first.");
             }
 
+            LocalDate expiry = parseExpiryDate(expiryDate);
             if (!cardGateway.isAppletActive(normalized)) {
-                cardGateway.activate(normalized, LocalDate.now());
+                cardGateway.activate(normalized, LocalDate.now(), expiry);
             }
             MemberRecord record = memberRepository.activate(normalized, expiryDate, phoneNumber);
             return finish("ADMIN", normalized, "ACTIVATE", true,
@@ -311,6 +316,17 @@ public class ConnectedTerminalService implements TerminalService {
 
     private String displayEmpty(String value, String fallback) {
         return value == null || value.trim().isEmpty() ? fallback : value;
+    }
+
+    private LocalDate parseExpiryDate(String expiryDate) {
+        if (expiryDate == null || expiryDate.trim().isEmpty()) {
+            throw new IllegalArgumentException("Expiry date cannot be empty");
+        }
+        try {
+            return LocalDate.parse(expiryDate.trim(), EXPIRY_FORMAT);
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("Expiry date must use YYYYMMDD", e);
+        }
     }
 
     private String finish(String terminal, String memberId, String action, boolean success, String message) {
