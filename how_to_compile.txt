@@ -1,0 +1,14 @@
+If you are on Windowd use Git Bash.
+
+Simulator:
+./run.sh simulator
+
+Frontend:
+./run.sh frontend
+
+Terminals passwd:
+	admin123 Admin Terminal
+	master123 Master Terminal
+	access123 Access Terminal
+
+Real Applet : 
