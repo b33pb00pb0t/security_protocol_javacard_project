@@ -1,0 +1,5 @@
+Simulator:
+javac -cp ".;lib/jcardsim-2.2.2-all.jar;lib/bcprov.jar.jar" -d build/classes src/backend/*.java src/frontend/*.java src/applet/*.java
+java -cp "build/classes;lib/jcardsim-2.2.2-all.jar;lib/bcprov.jar.jar" RunMembershipSimulator
+
+Real Applet : 
