@@ -1,6 +1,8 @@
 package terminals;
 
+import applet.ProtocolConstants;
 import backend.ApduDateCodec;
+import backend.Tier2ReceiptVerifier;
 
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
@@ -59,14 +61,15 @@ public class ControlledAccessTerminal extends BaseTerminal {
         SecureRandom.getInstanceStrong().nextBytes(terminalNonce);
         ResponseAPDU step1 = send(new CommandAPDU(CLA_PROPRIETARY, INS_T2_STEP1, 0x00, 0x00, terminalNonce));
         requireSuccess(step1, "Tier 2 step 1");
-        if (step1.getData().length != 215) {
+        if (step1.getData().length != ProtocolConstants.TIER2_STEP1_RESPONSE_LENGTH) {
             throw new IllegalStateException("Tier 2 step 1 returned " + step1.getData().length
-                    + " bytes; expected 215");
+                    + " bytes; expected " + ProtocolConstants.TIER2_STEP1_RESPONSE_LENGTH);
         }
 
         byte[] cardNonce = Arrays.copyOfRange(step1.getData(), 0, 16);
         byte[] cardSignature = Arrays.copyOfRange(step1.getData(), 16, 80);
-        byte[] cardCertificate = Arrays.copyOfRange(step1.getData(), 80, 215);
+        byte[] cardCertificate = Arrays.copyOfRange(step1.getData(), 80,
+                ProtocolConstants.TIER2_STEP1_RESPONSE_LENGTH);
         byte[] memberId = verifyAndGetIdFromCert(cardCertificate);
         PublicKey cardPublicKey = getCardPublicKeyFromCert(cardCertificate);
 
@@ -84,7 +87,7 @@ public class ControlledAccessTerminal extends BaseTerminal {
         signer.update(currentDate);
         byte[] terminalSignature = signer.sign();
 
-        ByteBuffer payload = ByteBuffer.allocate(203);
+        ByteBuffer payload = ByteBuffer.allocate(ProtocolConstants.TIER2_STEP2_PAYLOAD_LENGTH);
         payload.put(terminalSignature);
         payload.put(terminalCertificate);
         payload.put(masterSignature);
@@ -92,20 +95,32 @@ public class ControlledAccessTerminal extends BaseTerminal {
 
         ResponseAPDU step2 = send(new CommandAPDU(CLA_PROPRIETARY, INS_T2_STEP2, 0x00, 0x00, payload.array()));
         requireSuccess(step2, "Tier 2 step 2");
-        if (step2.getData().length != 1) {
+        if (step2.getData().length != ProtocolConstants.TIER2_RECEIPT_LENGTH) {
             throw new IllegalStateException("Tier 2 step 2 returned " + step2.getData().length
-                    + " bytes; expected 1");
+                    + " bytes; expected " + ProtocolConstants.TIER2_RECEIPT_LENGTH);
         }
+        Tier2ReceiptVerifier.Result receipt = Tier2ReceiptVerifier.verify(step2.getData(), cardPublicKey,
+                memberId, certificateId(terminalCertificate), currentDate, terminalNonce, cardNonce);
         System.out.println("[CAT] ACCESS GRANTED for " + bytesToHex(memberId)
-                + ". Daily Counter: " + (step2.getData()[0] & 0xFF));
+                + ". Daily Counter: " + receipt.getDailyCounter()
+                + ". Transaction Counter: " + receipt.getTransactionCounter()
+                + ". Receipt: " + bytesToHex(step2.getData()));
+    }
+
+    private static byte[] certificateId(byte[] certificate) {
+        return Arrays.copyOfRange(certificate, ProtocolConstants.CERT_ID_OFFSET,
+                ProtocolConstants.CERT_MODULUS_OFFSET);
     }
 
     private static byte[] buildTerminalCertificate(RSAPublicKey publicKey) {
-        byte[] certificate = new byte[71];
+        byte[] certificate = new byte[ProtocolConstants.CERTIFICATE_BODY_LENGTH];
         byte[] terminalId = {0x0A, 0x0B, 0x0C, 0x0D};
-        System.arraycopy(terminalId, 0, certificate, 0, 4);
-        System.arraycopy(toFixedByteArray(publicKey.getModulus(), 64), 0, certificate, 4, 64);
-        System.arraycopy(toFixedByteArray(publicKey.getPublicExponent(), 3), 0, certificate, 68, 3);
+        certificate[ProtocolConstants.CERT_ROLE_OFFSET] = ProtocolConstants.ROLE_CONTROLLED_ACCESS_TERMINAL;
+        System.arraycopy(terminalId, 0, certificate, ProtocolConstants.CERT_ID_OFFSET, 4);
+        System.arraycopy(toFixedByteArray(publicKey.getModulus(), 64), 0, certificate,
+                ProtocolConstants.CERT_MODULUS_OFFSET, 64);
+        System.arraycopy(toFixedByteArray(publicKey.getPublicExponent(), 3), 0, certificate,
+                ProtocolConstants.CERT_EXPONENT_OFFSET, 3);
         return certificate;
     }
 

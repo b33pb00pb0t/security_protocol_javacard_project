@@ -55,7 +55,7 @@ public final class HardwareSmokeTest {
                 gateway.provision(memberId);
                 System.out.println("Provisioning APDUs: SUCCESS");
                 gateway.activate(memberId, LocalDate.now(), expiry);
-                System.out.println("Activation APDU (12 bytes): SUCCESS");
+                System.out.println("Authenticated activation APDU: SUCCESS");
                 return;
             }
 
@@ -63,7 +63,7 @@ public final class HardwareSmokeTest {
                 String memberId = commandArguments.get(1);
                 LocalDate expiry = LocalDate.parse(commandArguments.get(2), DATE_FORMAT);
                 gateway.activate(memberId, LocalDate.now(), expiry);
-                System.out.println("Activation APDU (12 bytes): SUCCESS");
+                System.out.println("Authenticated activation APDU: SUCCESS");
                 return;
             }
 

@@ -1,6 +1,7 @@
 package backend;
 
 import applet.MembershipApplet;
+import applet.ProtocolConstants;
 import com.licel.jcardsim.base.Simulator;
 import javacard.framework.AID;
 
@@ -33,6 +34,7 @@ public class JCardSimGateway implements CardGateway {
     private static final byte INS_CHECKIN_T1 = (byte) 0x20;
     private static final byte INS_T2_STEP1 = (byte) 0x21;
     private static final byte INS_T2_STEP2 = (byte) 0x22;
+    private static final byte INS_ADMIN_CHALLENGE = (byte) 0x30;
     private static final byte INS_GET_CERT = (byte) 0x60;
 
     private static final byte[] APPLET_AID = new byte[] {
@@ -43,7 +45,10 @@ public class JCardSimGateway implements CardGateway {
     private final Map<String, CardSession> sessions = new HashMap<>();
     private final SecureRandom random = new SecureRandom();
     private final KeyPair masterKeyPair;
+    private final KeyPair adminKeyPair;
     private final KeyPair terminalKeyPair;
+    private final byte[] adminCertificate;
+    private final byte[] adminCertificateSignature;
     private final byte[] terminalCertificate;
     private final byte[] terminalCertificateSignature;
 
@@ -52,8 +57,16 @@ public class JCardSimGateway implements CardGateway {
             KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
             keyGen.initialize(512);
             this.masterKeyPair = keyGen.generateKeyPair();
+            this.adminKeyPair = keyGen.generateKeyPair();
             this.terminalKeyPair = keyGen.generateKeyPair();
-            this.terminalCertificate = buildEntityCertificateData(new byte[] {0x0A, 0x0B, 0x0C, 0x0D},
+            this.adminCertificate = buildEntityCertificateData(
+                    ProtocolConstants.ROLE_ADMIN_TERMINAL,
+                    new byte[] {0x0A, 0x0B, 0x0C, 0x0E},
+                    (RSAPublicKey) adminKeyPair.getPublic());
+            this.adminCertificateSignature = signWithMaster(adminCertificate);
+            this.terminalCertificate = buildEntityCertificateData(
+                    ProtocolConstants.ROLE_CONTROLLED_ACCESS_TERMINAL,
+                    new byte[] {0x0A, 0x0B, 0x0C, 0x0D},
                     (RSAPublicKey) terminalKeyPair.getPublic());
             this.terminalCertificateSignature = signWithMaster(terminalCertificate);
         } catch (Exception e) {
@@ -113,10 +126,9 @@ public class JCardSimGateway implements CardGateway {
     @Override
     public synchronized void activate(String memberId, LocalDate currentDate, LocalDate expiryDate) {
         CardSession session = requireSession(memberId);
-        byte[] payload = new byte[12];
-        System.arraycopy(CardId.toBytes(memberId), 0, payload, 0, 4);
-        System.arraycopy(ApduDateCodec.encode(currentDate), 0, payload, 4, 4);
-        System.arraycopy(ApduDateCodec.encode(expiryDate), 0, payload, 8, 4);
+        byte[] payload = buildAuthenticatedAdminPayload(session,
+                ProtocolConstants.OP_ACTIVATE,
+                activationOperationData(memberId, currentDate, expiryDate));
         requireSuccess(transmit(session, INS_ACTIVATE, payload), "Card activation");
         session.appletActive = true;
     }
@@ -129,7 +141,9 @@ public class JCardSimGateway implements CardGateway {
             return CardAccessResult.success("No simulator card session exists for " + normalized);
         }
 
-        ApduResponse response = transmit(session, INS_BLOCK, null);
+        ApduResponse response = transmit(session, INS_BLOCK,
+                buildAuthenticatedAdminPayload(session, ProtocolConstants.OP_BLOCK,
+                        blockOperationData(normalized)));
         if (response.isSuccess()) {
             session.appletActive = false;
             return CardAccessResult.success("Simulator card " + normalized + " moved to BLOCKED state");
@@ -178,13 +192,13 @@ public class JCardSimGateway implements CardGateway {
         if (!step1.isSuccess()) {
             return CardAccessResult.denied("Tier 2 step 1 failed with SW=" + step1.swHex());
         }
-        if (step1.data.length != 215) {
+        if (step1.data.length != ProtocolConstants.TIER2_STEP1_RESPONSE_LENGTH) {
             return CardAccessResult.denied("Tier 2 step 1 returned invalid length " + step1.data.length);
         }
 
         byte[] cardNonce = Arrays.copyOfRange(step1.data, 0, 16);
         byte[] sigma1 = Arrays.copyOfRange(step1.data, 16, 80);
-        byte[] certC = Arrays.copyOfRange(step1.data, 80, 215);
+        byte[] certC = Arrays.copyOfRange(step1.data, 80, ProtocolConstants.TIER2_STEP1_RESPONSE_LENGTH);
 
         try {
             PublicKey cardPublicKey = verifyAndExtractCardPublicKey(certC);
@@ -197,22 +211,28 @@ public class JCardSimGateway implements CardGateway {
 
             byte[] date = ApduDateCodec.encode(currentDate);
             byte[] sigma2 = signWithTerminal(cardNonce, date);
-            byte[] payload = new byte[203];
+            byte[] payload = new byte[ProtocolConstants.TIER2_STEP2_PAYLOAD_LENGTH];
             System.arraycopy(sigma2, 0, payload, 0, 64);
-            System.arraycopy(terminalCertificate, 0, payload, 64, 71);
-            System.arraycopy(terminalCertificateSignature, 0, payload, 135, 64);
-            System.arraycopy(date, 0, payload, 199, 4);
+            System.arraycopy(terminalCertificate, 0, payload, 64, ProtocolConstants.CERTIFICATE_BODY_LENGTH);
+            System.arraycopy(terminalCertificateSignature, 0, payload,
+                    64 + ProtocolConstants.CERTIFICATE_BODY_LENGTH, ProtocolConstants.SIGNATURE_LENGTH);
+            System.arraycopy(date, 0, payload,
+                    64 + ProtocolConstants.CERTIFICATE_BODY_LENGTH + ProtocolConstants.SIGNATURE_LENGTH, 4);
 
             ApduResponse step2 = transmit(session, INS_T2_STEP2, payload);
             if (!step2.isSuccess()) {
                 return CardAccessResult.denied("Tier 2 step 2 failed with SW=" + step2.swHex());
             }
-            if (step2.data.length != 1) {
+            if (step2.data.length != ProtocolConstants.TIER2_RECEIPT_LENGTH) {
                 return CardAccessResult.denied("Tier 2 step 2 returned invalid length " + step2.data.length);
             }
 
-            int counter = step2.data[0] & 0xFF;
-            return CardAccessResult.success("Tier 2 access granted by simulator card. DailyCounter=" + counter);
+            Tier2ReceiptVerifier.Result receipt = Tier2ReceiptVerifier.verify(step2.data, cardPublicKey,
+                    extractCertificateId(certC), extractCertificateId(terminalCertificate), date,
+                    terminalNonce, cardNonce);
+            return CardAccessResult.success("Tier 2 access granted by simulator card. DailyCounter="
+                    + receipt.getDailyCounter() + " TxCounter=" + receipt.getTransactionCounter()
+                    + " ReceiptVerified=true Receipt=" + toHex(step2.data));
         } catch (Exception e) {
             return CardAccessResult.denied(e.getMessage());
         }
@@ -242,37 +262,94 @@ public class JCardSimGateway implements CardGateway {
         return payload;
     }
 
+    private byte[] activationOperationData(String memberId, LocalDate currentDate, LocalDate expiryDate) {
+        byte[] data = new byte[ProtocolConstants.ADMIN_ACTIVATE_DATA_LENGTH];
+        data[0] = ProtocolConstants.OP_ACTIVATE;
+        System.arraycopy(CardId.toBytes(memberId), 0, data, 1, 4);
+        System.arraycopy(ApduDateCodec.encode(currentDate), 0, data, 5, 4);
+        System.arraycopy(ApduDateCodec.encode(expiryDate), 0, data, 9, 4);
+        return data;
+    }
+
+    private byte[] blockOperationData(String memberId) {
+        byte[] data = new byte[ProtocolConstants.ADMIN_BLOCK_DATA_LENGTH];
+        data[0] = ProtocolConstants.OP_BLOCK;
+        System.arraycopy(CardId.toBytes(memberId), 0, data, 1, 4);
+        return data;
+    }
+
+    private byte[] buildAuthenticatedAdminPayload(CardSession session, byte operation, byte[] operationData) {
+        ApduResponse challenge = transmit(session, INS_ADMIN_CHALLENGE, null);
+        requireSuccess(challenge, "Admin challenge");
+        if (challenge.data.length != ProtocolConstants.NONCE_LENGTH) {
+            throw new IllegalStateException("Admin challenge returned " + challenge.data.length
+                    + " bytes; expected " + ProtocolConstants.NONCE_LENGTH);
+        }
+        int expectedLength = operation == ProtocolConstants.OP_ACTIVATE
+                ? ProtocolConstants.ADMIN_ACTIVATE_PAYLOAD_LENGTH
+                : ProtocolConstants.ADMIN_BLOCK_PAYLOAD_LENGTH;
+        byte[] payload = new byte[expectedLength];
+        System.arraycopy(operationData, 0, payload, 0, operationData.length);
+        System.arraycopy(adminCertificate, 0, payload, operationData.length,
+                ProtocolConstants.CERTIFICATE_BODY_LENGTH);
+        System.arraycopy(adminCertificateSignature, 0, payload,
+                operationData.length + ProtocolConstants.CERTIFICATE_BODY_LENGTH,
+                ProtocolConstants.SIGNATURE_LENGTH);
+        System.arraycopy(signAdminOperation(operationData, challenge.data), 0, payload,
+                operationData.length + ProtocolConstants.CERTIFICATE_BODY_LENGTH
+                        + ProtocolConstants.SIGNATURE_LENGTH,
+                ProtocolConstants.SIGNATURE_LENGTH);
+        return payload;
+    }
+
     private byte[] buildCardCertificate(String memberId, RSAPublicKey cardPublicKey) throws Exception {
-        byte[] certificateData = buildEntityCertificateData(CardId.toBytes(memberId), cardPublicKey);
-        byte[] certC = new byte[135];
-        System.arraycopy(certificateData, 0, certC, 0, 71);
-        System.arraycopy(signWithMaster(certificateData), 0, certC, 71, 64);
+        byte[] certificateData = buildEntityCertificateData(
+                ProtocolConstants.ROLE_CARD, CardId.toBytes(memberId), cardPublicKey);
+        byte[] certC = new byte[ProtocolConstants.CARD_CERTIFICATE_LENGTH];
+        System.arraycopy(certificateData, 0, certC, 0, ProtocolConstants.CERTIFICATE_BODY_LENGTH);
+        System.arraycopy(signWithMaster(certificateData), 0, certC,
+                ProtocolConstants.CERT_SIGNATURE_OFFSET, ProtocolConstants.SIGNATURE_LENGTH);
         return certC;
     }
 
-    private byte[] buildEntityCertificateData(byte[] id, RSAPublicKey publicKey) {
-        byte[] certificateData = new byte[71];
-        System.arraycopy(id, 0, certificateData, 0, 4);
-        System.arraycopy(toFixedByteArray(publicKey.getModulus(), 64), 0, certificateData, 4, 64);
-        System.arraycopy(toFixedByteArray(publicKey.getPublicExponent(), 3), 0, certificateData, 68, 3);
+    private byte[] buildEntityCertificateData(byte role, byte[] id, RSAPublicKey publicKey) {
+        byte[] certificateData = new byte[ProtocolConstants.CERTIFICATE_BODY_LENGTH];
+        certificateData[ProtocolConstants.CERT_ROLE_OFFSET] = role;
+        System.arraycopy(id, 0, certificateData, ProtocolConstants.CERT_ID_OFFSET, 4);
+        System.arraycopy(toFixedByteArray(publicKey.getModulus(), 64), 0, certificateData,
+                ProtocolConstants.CERT_MODULUS_OFFSET, 64);
+        System.arraycopy(toFixedByteArray(publicKey.getPublicExponent(), 3), 0, certificateData,
+                ProtocolConstants.CERT_EXPONENT_OFFSET, 3);
         return certificateData;
     }
 
     private PublicKey verifyAndExtractCardPublicKey(byte[] certC) throws Exception {
-        if (certC.length != 135) {
-            throw new SecurityException("Card certificate length must be 135 bytes");
+        if (certC.length != ProtocolConstants.CARD_CERTIFICATE_LENGTH) {
+            throw new SecurityException("Card certificate length must be "
+                    + ProtocolConstants.CARD_CERTIFICATE_LENGTH + " bytes");
+        }
+        if (certC[ProtocolConstants.CERT_ROLE_OFFSET] != ProtocolConstants.ROLE_CARD) {
+            throw new SecurityException("Certificate role is not ROLE_CARD");
         }
         Signature verifier = Signature.getInstance("SHA1withRSA");
         verifier.initVerify(masterKeyPair.getPublic());
-        verifier.update(certC, 0, 71);
-        if (!verifier.verify(certC, 71, 64)) {
+        verifier.update(certC, 0, ProtocolConstants.CERTIFICATE_BODY_LENGTH);
+        if (!verifier.verify(certC, ProtocolConstants.CERT_SIGNATURE_OFFSET,
+                ProtocolConstants.SIGNATURE_LENGTH)) {
             throw new SecurityException("Card certificate signature verification failed");
         }
 
-        byte[] modulus = Arrays.copyOfRange(certC, 4, 68);
-        byte[] exponent = Arrays.copyOfRange(certC, 68, 71);
+        byte[] modulus = Arrays.copyOfRange(certC, ProtocolConstants.CERT_MODULUS_OFFSET,
+                ProtocolConstants.CERT_EXPONENT_OFFSET);
+        byte[] exponent = Arrays.copyOfRange(certC, ProtocolConstants.CERT_EXPONENT_OFFSET,
+                ProtocolConstants.CERT_SIGNATURE_OFFSET);
         RSAPublicKeySpec spec = new RSAPublicKeySpec(new BigInteger(1, modulus), new BigInteger(1, exponent));
         return KeyFactory.getInstance("RSA").generatePublic(spec);
+    }
+
+    private byte[] extractCertificateId(byte[] certificate) {
+        return Arrays.copyOfRange(certificate, ProtocolConstants.CERT_ID_OFFSET,
+                ProtocolConstants.CERT_MODULUS_OFFSET);
     }
 
     private byte[] signWithMaster(byte[] data) throws Exception {
@@ -296,6 +373,22 @@ public class JCardSimGateway implements CardGateway {
             throw new IllegalStateException("Expected 64-byte terminal signature");
         }
         return signed;
+    }
+
+    private byte[] signAdminOperation(byte[] operationData, byte[] nonce) {
+        try {
+            Signature signature = Signature.getInstance("SHA1withRSA");
+            signature.initSign(adminKeyPair.getPrivate());
+            signature.update(operationData);
+            signature.update(nonce);
+            byte[] signed = signature.sign();
+            if (signed.length != 64) {
+                throw new IllegalStateException("Expected 64-byte admin signature");
+            }
+            return signed;
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to sign admin operation", e);
+        }
     }
 
     private ApduResponse transmit(CardSession session, byte ins, byte[] data) {
@@ -332,6 +425,14 @@ public class JCardSimGateway implements CardGateway {
         int copyLength = Math.min(source.length, length);
         System.arraycopy(source, sourceOffset, destination, length - copyLength, copyLength);
         return destination;
+    }
+
+    private static String toHex(byte[] bytes) {
+        StringBuilder value = new StringBuilder(bytes.length * 2);
+        for (byte current : bytes) {
+            value.append(String.format("%02X", current & 0xFF));
+        }
+        return value.toString();
     }
 
     private static final class CardSession {

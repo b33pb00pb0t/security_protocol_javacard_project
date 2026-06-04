@@ -11,7 +11,8 @@ The access model has two levels:
 - Tier 1 performs certificate validation and challenge-response authentication.
   It has no applet-side daily counter.
 - Tier 2 performs mutual authentication and enforces a maximum of two accesses
-  per date. The date and daily counter are persistent applet state.
+  per date. The date, daily counter, and transaction counter are persistent
+  applet state. Successful Tier 2 responses now return a signed receipt.
 
 Membership records, phone numbers, package types, revocation records, audit
 events, and access-terminal snapshots are stored by the host application.
@@ -67,6 +68,7 @@ third-party SDK contents and generated output are grouped separately.
 | File | Purpose |
 | --- | --- |
 | `src/applet/MembershipApplet.java` | JavaCard applet implementing provisioning, activation, blocking, Tier 1, Tier 2, certificate retrieval, persistent state, and atomic updates. |
+| `src/applet/ProtocolConstants.java` | Shared role, operation, certificate, APDU length, nonce, and receipt constants used by applet and host code. |
 
 ### Backend
 
@@ -90,6 +92,7 @@ third-party SDK contents and generated output are grouped separately.
 | `src/backend/TerminalOfflineCache.java` | Builds and stores the access terminal's local active/block-list snapshot. |
 | `src/backend/TerminalOfflineSnapshot.java` | Immutable access-policy snapshot used during check-in. |
 | `src/backend/TerminalSyncService.java` | Produces synchronized block-list snapshots for terminals. |
+| `src/backend/Tier2ReceiptVerifier.java` | Reconstructs and verifies the signed Tier 2 receipt before host access is granted. |
 
 ### Swing Frontend
 
@@ -111,7 +114,7 @@ third-party SDK contents and generated output are grouped separately.
 | --- | --- |
 | `src/terminals/BaseTerminal.java` | Shared PC/SC connection, AID selection, certificate, and key helpers for standalone demos. |
 | `src/terminals/MasterTerminal.java` | Standalone physical-card provisioning demonstration. |
-| `src/terminals/AdminTerminal.java` | Standalone physical-card activation and blocking demonstration. |
+| `src/terminals/AdminTerminal.java` | Standalone physical-card activation and blocking demonstration using authenticated admin APDUs. |
 | `src/terminals/OpenAccessTerminal.java` | Standalone Tier 1 APDU and certificate-verification demonstration. |
 | `src/terminals/ControlledAccessTerminal.java` | Standalone Tier 2 APDU and terminal-certificate demonstration. |
 
@@ -278,7 +281,91 @@ java -cp "build/classes-host;lib/*" tools.HardwareSmokeTest --allow-card-modific
 
 Without `--date`, Tier 2 uses `LocalDate.now()`.
 
-## 9. APDU Contract Summary
+## 9. Protocol Security Changes
+
+### Certificate Roles
+
+Certificates now include a signed entity role byte. The signed certificate body
+is:
+
+```text
+Role(1) || EntityID(4) || RSA_Modulus(64) || RSA_Exponent(3)
+```
+
+The body is 72 bytes and the issuer/master signature is 64 bytes, so a full
+certificate is 136 bytes:
+
+```text
+CertBody(72) || MasterSignature(64)
+```
+
+Roles enforced by the current implementation:
+
+| Role | Value | Used for |
+| --- | --- | --- |
+| `ROLE_CARD` | `01` | Card certificates loaded during personalization and returned by the applet. |
+| `ROLE_ADMIN_TERMINAL` | `03` | Authenticated activation and block APDUs. |
+| `ROLE_CONTROLLED_ACCESS_TERMINAL` | `05` | Tier 2 terminal certificates. |
+
+`ROLE_MASTER_TERMINAL` and `ROLE_OPEN_ACCESS_TERMINAL` are defined for the
+shared protocol, but the current applet does not authenticate a terminal
+certificate for Tier 1 or provisioning.
+
+### Authenticated Admin Commands
+
+Admin state-changing APDUs now use challenge-response authentication:
+
+```text
+1. Admin terminal -> Card: INS 30
+2. Card -> Admin terminal: NC(16)
+3. Admin terminal -> Card:
+   operationData || AdminCertBody(72) || AdminMasterSignature(64) || AdminSignature(64)
+```
+
+The applet verifies that the admin certificate is signed by the master key, has
+`ROLE_ADMIN_TERMINAL`, and that the admin signature covers the operation data
+and the fresh card nonce `NC`.
+
+Signed operation data:
+
+```text
+ACTIVATE: OP_ACTIVATE || CardID || CurrentDate || ExpiryDate
+BLOCK:    OP_BLOCK    || CardID
+```
+
+The applet appends `NC` internally before verifying the admin signature. Only
+after all checks pass does it update persistent card state inside a JavaCard
+transaction.
+
+### Signed Tier 2 Receipt
+
+Tier 2 step 2 still sends one short APDU under 255 bytes. After successful
+terminal authentication and counter update, the card returns:
+
+```text
+ResultCode(1) || DailyCounter(1) || TransactionCounter(2) || CardSignature(64)
+```
+
+The card signs:
+
+```text
+OP_T2_RESULT
+|| CardID
+|| TerminalID
+|| Date
+|| TerminalNonce NT
+|| CardNonce NC
+|| DailyCounter
+|| TransactionCounter
+|| ResultCode
+```
+
+`JCardSimGateway`, `HardwareCardGateway`, and `ControlledAccessTerminal` verify
+this signature before reporting access granted. Successful GUI Tier 2 messages
+include the verified receipt hex, so `audit_log.csv` can retain it for
+forensics.
+
+## 10. APDU Contract Summary
 
 All proprietary commands use CLA `B0`, P1 `00`, and P2 `00`. Dates are four
 BCD bytes in `YYYYMMDD` order.
@@ -286,14 +373,15 @@ BCD bytes in `YYYYMMDD` order.
 | INS | Operation | Input format | Output format | Required state | Persistent state change |
 | --- | --- | --- | --- | --- | --- |
 | `10` | Load card private key | modulus(64) \|\| privateExponent(64) | none | `INITIALIZE` | Yes |
-| `11` | Load card certificate | memberId(4) \|\| cardPublicKey(67) \|\| masterSignature(64) | none | `INITIALIZE` | Yes |
+| `11` | Load card certificate | CertCBody(72) \|\| MasterSignature(64) | none | `INITIALIZE` | Yes |
 | `12` | Load master public key | modulus(64) \|\| exponent(3) | none | `INITIALIZE` | Yes |
-| `13` | Activate card | memberId(4) \|\| currentDate(4) \|\| expiryDate(4) | none | `INITIALIZE` or `INACTIVE` | Yes |
-| `14` | Block card | none | none | `ACTIVE` | Yes |
+| `13` | Activate card | OP_ACTIVATE(1) \|\| cardId(4) \|\| currentDate(4) \|\| expiryDate(4) \|\| AdminCertBody(72) \|\| AdminMasterSignature(64) \|\| AdminSignature(64) | none | `INITIALIZE` or `INACTIVE` | Yes |
+| `14` | Block card | OP_BLOCK(1) \|\| cardId(4) \|\| AdminCertBody(72) \|\| AdminMasterSignature(64) \|\| AdminSignature(64) | none | `ACTIVE` | Yes |
 | `20` | Tier 1 check-in | terminalNonce(16) | cardSignature(64) | `ACTIVE` | No |
-| `21` | Tier 2 step 1 | terminalNonce(16) | cardNonce(16) \|\| cardSignature(64) \|\| Cert_C(135) | `ACTIVE` | No; stores transient nonce |
-| `22` | Tier 2 step 2 | terminalSignature(64) \|\| terminalCertificate(71) \|\| terminalMasterSignature(64) \|\| date(4) | dailyCounter(1) | `ACTIVE`, valid step 1/authentication, below daily limit | Yes |
-| `60` | Get card certificate | none | Cert_C(135) | Any state except `BLOCKED` | No |
+| `21` | Tier 2 step 1 | terminalNonce(16) | cardNonce(16) \|\| cardSignature(64) \|\| Cert_C(136) | `ACTIVE` | No; stores transient nonces |
+| `22` | Tier 2 step 2 | terminalSignature(64) \|\| CertTBody(72) \|\| TerminalMasterSignature(64) \|\| date(4) | resultCode(1) \|\| dailyCounter(1) \|\| transactionCounter(2) \|\| cardSignature(64) | `ACTIVE`, valid step 1/authentication, below daily limit | Yes |
+| `30` | Admin challenge | none | adminNonce(16) | Any selected state | No; stores transient nonce |
+| `60` | Get card certificate | none | Cert_C(136) | Any state except `BLOCKED` | No |
 
 Common status words:
 
@@ -316,18 +404,18 @@ Tier 2 physical-card diagnostic status words:
 | `6F13` | Terminal signature verification exception |
 | `6F14` | Date/counter transaction exception |
 
-## 10. Physical JavaCard Issue Fixed
+## 11. Physical JavaCard Issue Fixed
 
-Tier 2 step 2 sends a 203-byte APDU. JCardSim delivered that payload in one
-receive operation, but the physical JavaCard could deliver it in multiple
-chunks and previously failed internally with `SW=6F00`.
+Tier 2 step 2 sends a 204-byte APDU after the certificate role byte was added.
+JCardSim can deliver that payload in one receive operation, but a physical
+JavaCard may deliver it in multiple chunks and previously failed internally
+with `SW=6F00`.
 
 `MembershipApplet.receiveFullIncoming()` now calls `setIncomingAndReceive()`
 and continues with `receiveBytes()` until the full `Lc` has arrived. Tier 2
-step 2 uses this helper before parsing the unchanged 203-byte protocol
-payload. Hardware Tier 2 works with the canonical applet after this fix.
+step 2 uses this helper before parsing the 204-byte protocol payload.
 
-## 11. Current Verification Status
+## 12. Current Verification Status
 
 Verification status as of June 4, 2026:
 
@@ -336,17 +424,18 @@ Verification status as of June 4, 2026:
 | Host build | Pass |
 | CAP build and verification | Pass |
 | Simulator connected-service regression | Pass |
-| Simulator APDU negative checks | Pass |
-| Hardware reader discovery and SELECT | Pass |
-| Hardware Tier 1 | Pass |
-| Hardware Tier 2 with canonical applet | Pass |
+| Simulator APDU negative checks for roles/admin authentication | Pass |
+| Simulator signed Tier 2 receipt and tamper checks | Pass |
+| Hardware reader discovery and SELECT-only smoke | Pass |
+| Hardware Tier 1 | Previously passed with canonical applet |
+| Hardware Tier 2 | Requires installing the rebuilt CAP before retest |
 | Tier 2 daily limit | Pass |
 
 The final cleanup verification reruns the build, simulator regression, and
 SELECT-only hardware smoke test. It intentionally does not rerun
 state-changing physical-card commands.
 
-## 12. Known Limitations
+## 13. Known Limitations
 
 - Renewal and deactivation are backend policy operations because the applet
   does not define corresponding APDUs.
@@ -355,10 +444,8 @@ state-changing physical-card commands.
 - The applet accepts malformed BCD date bytes.
 - SHA1withRSA and RSA-512 are project/demo choices and are not suitable for a
   production deployment.
-- Tier 2 returns only the updated counter byte, not a signed transaction
-  receipt.
-- Admin commands are not fully authenticated as they would be in an ideal
-  production protocol.
+- Tier 1 proves card possession by challenge-response, but the applet does not
+  authenticate a signed open-access terminal certificate.
 - Hardware demo keys are stored as files under `hardware_keys/`; production
   deployments require protected key management.
 - The standalone terminal CLIs are APDU demonstrations and do not implement
@@ -367,7 +454,7 @@ state-changing physical-card commands.
   it against cards provisioned by `HardwareCardGateway` unless the credentials
   have been deliberately aligned.
 
-## 13. Reproducible Commands
+## 14. Reproducible Commands
 
 ```powershell
 # Build CAP and host application

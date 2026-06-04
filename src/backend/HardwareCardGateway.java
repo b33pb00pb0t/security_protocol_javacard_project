@@ -1,5 +1,7 @@
 package backend;
 
+import applet.ProtocolConstants;
+
 import javax.smartcardio.Card;
 import javax.smartcardio.CardChannel;
 import javax.smartcardio.CardException;
@@ -43,6 +45,7 @@ public class HardwareCardGateway implements CardGateway {
     private static final byte INS_CHECKIN_T1 = (byte) 0x20;
     private static final byte INS_T2_STEP1 = (byte) 0x21;
     private static final byte INS_T2_STEP2 = (byte) 0x22;
+    private static final byte INS_ADMIN_CHALLENGE = (byte) 0x30;
     private static final byte INS_GET_CERT = (byte) 0x60;
 
     private static final byte[] DEFAULT_APPLET_AID = new byte[] {
@@ -57,7 +60,10 @@ public class HardwareCardGateway implements CardGateway {
     private final String preferredReaderName;
     private final byte[] appletAid;
     private final KeyPair masterKeyPair;
+    private final KeyPair adminKeyPair;
     private final KeyPair terminalKeyPair;
+    private final byte[] adminCertificate;
+    private final byte[] adminCertificateSignature;
     private final byte[] terminalCertificate;
     private final byte[] terminalCertificateSignature;
     private final String masterKeySource;
@@ -87,11 +93,18 @@ public class HardwareCardGateway implements CardGateway {
             boolean masterKeyExists = keyPairExists("master");
             boolean terminalKeyExists = keyPairExists("terminal");
             this.masterKeyPair = loadOrCreateKeyPair("master");
+            this.adminKeyPair = loadOrCreateKeyPair("admin");
             this.terminalKeyPair = loadOrCreateKeyPair("terminal");
             this.masterKeySource = keySource("master", masterKeyExists);
+            this.adminCertificate = buildEntityCertificateData(
+                    ProtocolConstants.ROLE_ADMIN_TERMINAL,
+                    new byte[] {0x0A, 0x0B, 0x0C, 0x0E},
+                    (RSAPublicKey) adminKeyPair.getPublic());
+            this.adminCertificateSignature = signWithMaster(adminCertificate);
             this.terminalKeySource = keySource("terminal", terminalKeyExists);
             Files.write(Paths.get("master_public.key"), masterKeyPair.getPublic().getEncoded());
             this.terminalCertificate = buildEntityCertificateData(
+                    ProtocolConstants.ROLE_CONTROLLED_ACCESS_TERMINAL,
                     new byte[] {0x0A, 0x0B, 0x0C, 0x0D},
                     (RSAPublicKey) terminalKeyPair.getPublic());
             this.terminalCertificateSignature = signWithMaster(terminalCertificate);
@@ -259,10 +272,8 @@ public class HardwareCardGateway implements CardGateway {
             }
             boundMemberId = normalized;
         }
-        byte[] payload = new byte[12];
-        System.arraycopy(CardId.toBytes(normalized), 0, payload, 0, 4);
-        System.arraycopy(ApduDateCodec.encode(currentDate), 0, payload, 4, 4);
-        System.arraycopy(ApduDateCodec.encode(expiryDate), 0, payload, 8, 4);
+        byte[] payload = buildAuthenticatedAdminPayload(ProtocolConstants.OP_ACTIVATE,
+                activationOperationData(normalized, currentDate, expiryDate));
         ApduResponse activationResponse = transmit(INS_ACTIVATE, payload);
         if (!activationResponse.isSuccess()) {
             // The applet rejects activation while already ACTIVE. Prove that state with
@@ -285,7 +296,9 @@ public class HardwareCardGateway implements CardGateway {
             requireSuccess(certificateResponse, "GET_CERT before block");
             verifyAndExtractCardPublicKey(certificateResponse.data);
             verifyCardMember(certificateResponse.data, normalized);
-            ApduResponse response = transmit(INS_BLOCK, null);
+            ApduResponse response = transmit(INS_BLOCK,
+                    buildAuthenticatedAdminPayload(ProtocolConstants.OP_BLOCK,
+                            blockOperationData(normalized)));
             if (!response.isSuccess()) {
                 return CardAccessResult.denied("Block APDU failed with SW=" + response.swHex());
             }
@@ -349,17 +362,19 @@ public class HardwareCardGateway implements CardGateway {
             ApduResponse step1 = transmit(INS_T2_STEP1, terminalNonce);
             debugTier2("Step 1 response: SW=" + step1.swHex() + ", dataLength=" + step1.data.length);
             requireSuccess(step1, "Tier 2 step 1");
-            if (step1.data.length != 215) {
+            if (step1.data.length != ProtocolConstants.TIER2_STEP1_RESPONSE_LENGTH) {
                 return CardAccessResult.denied("Tier 2 step 1 returned " + step1.data.length
-                        + " bytes; expected 215");
+                        + " bytes; expected " + ProtocolConstants.TIER2_STEP1_RESPONSE_LENGTH);
             }
 
             byte[] cardNonce = Arrays.copyOfRange(step1.data, 0, 16);
             byte[] cardSignature = Arrays.copyOfRange(step1.data, 16, 80);
-            byte[] certC = Arrays.copyOfRange(step1.data, 80, 215);
+            byte[] certC = Arrays.copyOfRange(step1.data, 80, ProtocolConstants.TIER2_STEP1_RESPONSE_LENGTH);
             debugTier2("Step 1 parsed: NC=" + cardNonce.length + ", cardSignature="
                     + cardSignature.length + ", cardCertificate=" + certC.length);
-            debugTier2("Card certificate: ID=" + toHex(Arrays.copyOfRange(certC, 0, 4))
+            debugTier2("Card certificate: role=" + String.format("%02X", certC[0] & 0xFF)
+                    + ", ID=" + toHex(Arrays.copyOfRange(certC,
+                    ProtocolConstants.CERT_ID_OFFSET, ProtocolConstants.CERT_MODULUS_OFFSET))
                     + ", length=" + certC.length);
 
             boolean masterSignatureValid = verifyCardCertificateSignature(certC);
@@ -381,18 +396,21 @@ public class HardwareCardGateway implements CardGateway {
 
             byte[] date = ApduDateCodec.encode(currentDate);
             byte[] terminalSignature = signWithTerminal(cardNonce, date);
-            byte[] payload = new byte[203];
+            byte[] payload = new byte[ProtocolConstants.TIER2_STEP2_PAYLOAD_LENGTH];
             System.arraycopy(terminalSignature, 0, payload, 0, 64);
-            System.arraycopy(terminalCertificate, 0, payload, 64, 71);
-            System.arraycopy(terminalCertificateSignature, 0, payload, 135, 64);
-            System.arraycopy(date, 0, payload, 199, 4);
+            System.arraycopy(terminalCertificate, 0, payload, 64, ProtocolConstants.CERTIFICATE_BODY_LENGTH);
+            System.arraycopy(terminalCertificateSignature, 0, payload,
+                    64 + ProtocolConstants.CERTIFICATE_BODY_LENGTH, ProtocolConstants.SIGNATURE_LENGTH);
+            System.arraycopy(date, 0, payload,
+                    64 + ProtocolConstants.CERTIFICATE_BODY_LENGTH + ProtocolConstants.SIGNATURE_LENGTH, 4);
 
             debugTier2("Step 2 request: INS=0x" + String.format("%02X", INS_T2_STEP2 & 0xFF)
                     + ", terminalSignature=" + terminalSignature.length
                     + ", terminalCertificate=" + terminalCertificate.length
                     + ", terminalMasterSignature=" + terminalCertificateSignature.length);
             debugTier2("Step 2 date: " + toHex(date));
-            debugTier2("Step 2 payloadLength=" + payload.length + " (expected 203)");
+            debugTier2("Step 2 payloadLength=" + payload.length + " (expected "
+                    + ProtocolConstants.TIER2_STEP2_PAYLOAD_LENGTH + ")");
             debugTier2("Step 2 payload hex: " + hexPrefixSuffix(payload, 24));
             ApduResponse step2 = transmit(INS_T2_STEP2, payload);
             debugTier2("Step 2 response: SW=" + step2.swHex() + ", dataLength=" + step2.data.length);
@@ -402,14 +420,21 @@ public class HardwareCardGateway implements CardGateway {
                         + "old installed applet, or physical APDU receive issue.");
             }
             requireSuccess(step2, "Tier 2 step 2");
-            if (step2.data.length != 1) {
+            if (step2.data.length != ProtocolConstants.TIER2_RECEIPT_LENGTH) {
                 return CardAccessResult.denied("Tier 2 step 2 returned " + step2.data.length
-                        + " bytes; expected 1");
+                        + " bytes; expected " + ProtocolConstants.TIER2_RECEIPT_LENGTH);
             }
 
+            Tier2ReceiptVerifier.Result receipt = Tier2ReceiptVerifier.verify(step2.data, cardPublicKey,
+                    extractCertificateId(certC), extractCertificateId(terminalCertificate), date,
+                    terminalNonce, cardNonce);
+            debugTier2("Tier 2 receipt verification: true, resultCode=" + receipt.getResultCode()
+                    + ", dailyCounter=" + receipt.getDailyCounter()
+                    + ", transactionCounter=" + receipt.getTransactionCounter());
             appletActive = Boolean.TRUE;
             return CardAccessResult.success("Tier 2 access granted by physical card. DailyCounter="
-                    + (step2.data[0] & 0xFF));
+                    + receipt.getDailyCounter() + " TxCounter=" + receipt.getTransactionCounter()
+                    + " ReceiptVerified=true Receipt=" + toHex(step2.data));
         } catch (Exception e) {
             return CardAccessResult.denied(e.getMessage());
         }
@@ -474,25 +499,74 @@ public class HardwareCardGateway implements CardGateway {
         return payload;
     }
 
+    private byte[] activationOperationData(String memberId, LocalDate currentDate, LocalDate expiryDate) {
+        byte[] data = new byte[ProtocolConstants.ADMIN_ACTIVATE_DATA_LENGTH];
+        data[0] = ProtocolConstants.OP_ACTIVATE;
+        System.arraycopy(CardId.toBytes(memberId), 0, data, 1, 4);
+        System.arraycopy(ApduDateCodec.encode(currentDate), 0, data, 5, 4);
+        System.arraycopy(ApduDateCodec.encode(expiryDate), 0, data, 9, 4);
+        return data;
+    }
+
+    private byte[] blockOperationData(String memberId) {
+        byte[] data = new byte[ProtocolConstants.ADMIN_BLOCK_DATA_LENGTH];
+        data[0] = ProtocolConstants.OP_BLOCK;
+        System.arraycopy(CardId.toBytes(memberId), 0, data, 1, 4);
+        return data;
+    }
+
+    private byte[] buildAuthenticatedAdminPayload(byte operation, byte[] operationData) {
+        ApduResponse challenge = transmit(INS_ADMIN_CHALLENGE, null);
+        requireSuccess(challenge, "Admin challenge");
+        if (challenge.data.length != ProtocolConstants.NONCE_LENGTH) {
+            throw new IllegalStateException("Admin challenge returned " + challenge.data.length
+                    + " bytes; expected " + ProtocolConstants.NONCE_LENGTH);
+        }
+        int expectedLength = operation == ProtocolConstants.OP_ACTIVATE
+                ? ProtocolConstants.ADMIN_ACTIVATE_PAYLOAD_LENGTH
+                : ProtocolConstants.ADMIN_BLOCK_PAYLOAD_LENGTH;
+        byte[] payload = new byte[expectedLength];
+        System.arraycopy(operationData, 0, payload, 0, operationData.length);
+        System.arraycopy(adminCertificate, 0, payload, operationData.length,
+                ProtocolConstants.CERTIFICATE_BODY_LENGTH);
+        System.arraycopy(adminCertificateSignature, 0, payload,
+                operationData.length + ProtocolConstants.CERTIFICATE_BODY_LENGTH,
+                ProtocolConstants.SIGNATURE_LENGTH);
+        System.arraycopy(signAdminOperation(operationData, challenge.data), 0, payload,
+                operationData.length + ProtocolConstants.CERTIFICATE_BODY_LENGTH
+                        + ProtocolConstants.SIGNATURE_LENGTH,
+                ProtocolConstants.SIGNATURE_LENGTH);
+        return payload;
+    }
+
     private byte[] buildCardCertificate(String memberId, RSAPublicKey cardPublicKey) throws Exception {
-        byte[] certificateData = buildEntityCertificateData(CardId.toBytes(memberId), cardPublicKey);
-        byte[] certC = new byte[135];
-        System.arraycopy(certificateData, 0, certC, 0, 71);
-        System.arraycopy(signWithMaster(certificateData), 0, certC, 71, 64);
+        byte[] certificateData = buildEntityCertificateData(
+                ProtocolConstants.ROLE_CARD, CardId.toBytes(memberId), cardPublicKey);
+        byte[] certC = new byte[ProtocolConstants.CARD_CERTIFICATE_LENGTH];
+        System.arraycopy(certificateData, 0, certC, 0, ProtocolConstants.CERTIFICATE_BODY_LENGTH);
+        System.arraycopy(signWithMaster(certificateData), 0, certC,
+                ProtocolConstants.CERT_SIGNATURE_OFFSET, ProtocolConstants.SIGNATURE_LENGTH);
         return certC;
     }
 
-    private byte[] buildEntityCertificateData(byte[] id, RSAPublicKey publicKey) {
-        byte[] certificateData = new byte[71];
-        System.arraycopy(id, 0, certificateData, 0, 4);
-        System.arraycopy(toFixedByteArray(publicKey.getModulus(), 64), 0, certificateData, 4, 64);
-        System.arraycopy(toFixedByteArray(publicKey.getPublicExponent(), 3), 0, certificateData, 68, 3);
+    private byte[] buildEntityCertificateData(byte role, byte[] id, RSAPublicKey publicKey) {
+        byte[] certificateData = new byte[ProtocolConstants.CERTIFICATE_BODY_LENGTH];
+        certificateData[ProtocolConstants.CERT_ROLE_OFFSET] = role;
+        System.arraycopy(id, 0, certificateData, ProtocolConstants.CERT_ID_OFFSET, 4);
+        System.arraycopy(toFixedByteArray(publicKey.getModulus(), 64), 0, certificateData,
+                ProtocolConstants.CERT_MODULUS_OFFSET, 64);
+        System.arraycopy(toFixedByteArray(publicKey.getPublicExponent(), 3), 0, certificateData,
+                ProtocolConstants.CERT_EXPONENT_OFFSET, 3);
         return certificateData;
     }
 
     private PublicKey verifyAndExtractCardPublicKey(byte[] certC) throws Exception {
-        if (certC.length != 135) {
-            throw new SecurityException("Card certificate length must be 135 bytes");
+        if (certC.length != ProtocolConstants.CARD_CERTIFICATE_LENGTH) {
+            throw new SecurityException("Card certificate length must be "
+                    + ProtocolConstants.CARD_CERTIFICATE_LENGTH + " bytes");
+        }
+        if (certC[ProtocolConstants.CERT_ROLE_OFFSET] != ProtocolConstants.ROLE_CARD) {
+            throw new SecurityException("Certificate role is not ROLE_CARD");
         }
         if (!verifyCardCertificateSignature(certC)) {
             throw new SecurityException("Card certificate signature verification failed");
@@ -501,24 +575,34 @@ public class HardwareCardGateway implements CardGateway {
     }
 
     private boolean verifyCardCertificateSignature(byte[] certC) throws Exception {
-        if (certC.length != 135) {
+        if (certC.length != ProtocolConstants.CARD_CERTIFICATE_LENGTH
+                || certC[ProtocolConstants.CERT_ROLE_OFFSET] != ProtocolConstants.ROLE_CARD) {
             return false;
         }
         Signature verifier = Signature.getInstance("SHA1withRSA");
         verifier.initVerify(masterKeyPair.getPublic());
-        verifier.update(certC, 0, 71);
-        return verifier.verify(certC, 71, 64);
+        verifier.update(certC, 0, ProtocolConstants.CERTIFICATE_BODY_LENGTH);
+        return verifier.verify(certC, ProtocolConstants.CERT_SIGNATURE_OFFSET,
+                ProtocolConstants.SIGNATURE_LENGTH);
     }
 
     private PublicKey extractCardPublicKey(byte[] certC) throws Exception {
-        byte[] modulus = Arrays.copyOfRange(certC, 4, 68);
-        byte[] exponent = Arrays.copyOfRange(certC, 68, 71);
+        byte[] modulus = Arrays.copyOfRange(certC, ProtocolConstants.CERT_MODULUS_OFFSET,
+                ProtocolConstants.CERT_EXPONENT_OFFSET);
+        byte[] exponent = Arrays.copyOfRange(certC, ProtocolConstants.CERT_EXPONENT_OFFSET,
+                ProtocolConstants.CERT_SIGNATURE_OFFSET);
         return KeyFactory.getInstance("RSA").generatePublic(
                 new RSAPublicKeySpec(new BigInteger(1, modulus), new BigInteger(1, exponent)));
     }
 
+    private byte[] extractCertificateId(byte[] certificate) {
+        return Arrays.copyOfRange(certificate, ProtocolConstants.CERT_ID_OFFSET,
+                ProtocolConstants.CERT_MODULUS_OFFSET);
+    }
+
     private void verifyCardMember(byte[] certC, String expectedMemberId) {
-        String certificateMemberId = toHex(Arrays.copyOfRange(certC, 0, 4));
+        String certificateMemberId = toHex(Arrays.copyOfRange(certC,
+                ProtocolConstants.CERT_ID_OFFSET, ProtocolConstants.CERT_MODULUS_OFFSET));
         if (!certificateMemberId.equals(CardId.normalize(expectedMemberId))) {
             throw new SecurityException("Inserted card certificate belongs to " + certificateMemberId
                     + ", not requested member " + CardId.normalize(expectedMemberId));
@@ -538,6 +622,18 @@ public class HardwareCardGateway implements CardGateway {
         signature.update(cardNonce);
         signature.update(currentDate);
         return requireSignatureLength(signature.sign());
+    }
+
+    private byte[] signAdminOperation(byte[] operationData, byte[] nonce) {
+        try {
+            Signature signature = Signature.getInstance("SHA1withRSA");
+            signature.initSign(adminKeyPair.getPrivate());
+            signature.update(operationData);
+            signature.update(nonce);
+            return requireSignatureLength(signature.sign());
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to sign admin operation", e);
+        }
     }
 
     private static byte[] requireSignatureLength(byte[] signature) {

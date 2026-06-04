@@ -25,6 +25,7 @@ public final class MembershipApplet extends Applet {
     private static final byte INS_CHECKIN_T1 = (byte) 0x20;
     private static final byte INS_T2_STEP1 = (byte) 0x21;
     private static final byte INS_T2_STEP2 = (byte) 0x22;
+    private static final byte INS_ADMIN_CHALLENGE = (byte) 0x30;
     private static final byte INS_GET_CERT = (byte) 0x60;
 
     private static final short SW_APDU_RECEIVE_PROBLEM = (short) 0x6F10;
@@ -40,9 +41,11 @@ public final class MembershipApplet extends Applet {
 
     private byte currentState;
     private byte dailyCounter;
+    private short transactionCounter;
     private byte[] lastDate = new byte[4];
     private byte[] memberId = new byte[4];
     private byte[] expiryDate = new byte[4];
+    private byte adminChallengeReady;
 
     private RSAPrivateKey cardPrivateKey;
     private RSAPublicKey masterPublicKey;
@@ -54,6 +57,7 @@ public final class MembershipApplet extends Applet {
     private final byte[] certC; 
     
     // Tier 2 challenge state must disappear when the card is deselected.
+    private byte[] transientNt;
     private byte[] transientNc;
     private byte[] transientAuthData;
 
@@ -64,8 +68,9 @@ public final class MembershipApplet extends Applet {
     private MembershipApplet() {
         currentState = STATE_INITIALIZE;
         dailyCounter = (byte) 0x00;
+        transactionCounter = (short) 0;
         
-        certC = new byte[135];
+        certC = new byte[ProtocolConstants.CARD_CERTIFICATE_LENGTH];
         
         cardPrivateKey = (RSAPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PRIVATE, KeyBuilder.LENGTH_RSA_512, false);
         masterPublicKey = (RSAPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PUBLIC, KeyBuilder.LENGTH_RSA_512, false);
@@ -77,8 +82,9 @@ public final class MembershipApplet extends Applet {
         
         rng = RandomData.getInstance(RandomData.ALG_SECURE_RANDOM);
 
-        transientNc = JCSystem.makeTransientByteArray((short) 16, JCSystem.CLEAR_ON_DESELECT);
-        transientAuthData = JCSystem.makeTransientByteArray((short) 20, JCSystem.CLEAR_ON_DESELECT);
+        transientNt = JCSystem.makeTransientByteArray(ProtocolConstants.NONCE_LENGTH, JCSystem.CLEAR_ON_DESELECT);
+        transientNc = JCSystem.makeTransientByteArray(ProtocolConstants.NONCE_LENGTH, JCSystem.CLEAR_ON_DESELECT);
+        transientAuthData = JCSystem.makeTransientByteArray((short) 64, JCSystem.CLEAR_ON_DESELECT);
     }   
 
     @Override
@@ -99,6 +105,7 @@ public final class MembershipApplet extends Applet {
             case INS_CHECKIN_T1: processCheckInTier1(apdu, buffer); break;
             case INS_T2_STEP1: processCheckInTier2Step1(apdu); break;
             case INS_T2_STEP2: processCheckInTier2Step2(apdu); break;
+            case INS_ADMIN_CHALLENGE: processAdminChallenge(apdu, buffer); break;
             case INS_GET_CERT: processGetCert(apdu, buffer); break;
             default: ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);
         }
@@ -166,14 +173,29 @@ public final class MembershipApplet extends Applet {
         if (currentState != STATE_INITIALIZE) 
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         
-        short bytesRead = apdu.setIncomingAndReceive();
-        if (bytesRead != (short) 135) 
+        short bytesRead = receiveFullIncoming(apdu, buffer);
+        if (bytesRead != ProtocolConstants.CARD_CERTIFICATE_LENGTH)
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+
+        if (buffer[(short) (ISO7816.OFFSET_CDATA + ProtocolConstants.CERT_ROLE_OFFSET)]
+                != ProtocolConstants.ROLE_CARD) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+
+        verifier.init(masterPublicKey, Signature.MODE_VERIFY);
+        if (!verifier.verify(buffer, ISO7816.OFFSET_CDATA,
+                ProtocolConstants.CERTIFICATE_BODY_LENGTH,
+                buffer,
+                (short) (ISO7816.OFFSET_CDATA + ProtocolConstants.CERT_SIGNATURE_OFFSET),
+                ProtocolConstants.SIGNATURE_LENGTH)) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
 
         // If the card is removed mid-operation, the JCSystem rolls back to the previous state.
         JCSystem.beginTransaction();
         try {
-            Util.arrayCopy(buffer, ISO7816.OFFSET_CDATA, certC, (short) 0, (short) 135);
+            Util.arrayCopy(buffer, ISO7816.OFFSET_CDATA, certC, (short) 0,
+                    ProtocolConstants.CARD_CERTIFICATE_LENGTH);
             JCSystem.commitTransaction(); 
         } catch (Exception e) {
             JCSystem.abortTransaction();
@@ -206,17 +228,23 @@ public final class MembershipApplet extends Applet {
         if (currentState != STATE_INITIALIZE && currentState != STATE_INACTIVE) {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
-        short bytesRead = apdu.setIncomingAndReceive();
-        if (bytesRead != (short) 12) 
+        short bytesRead = receiveFullIncoming(apdu, buffer);
+        if (bytesRead != ProtocolConstants.ADMIN_ACTIVATE_PAYLOAD_LENGTH)
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+
+        verifyAuthenticatedAdminCommand(buffer, ProtocolConstants.OP_ACTIVATE,
+                ProtocolConstants.ADMIN_ACTIVATE_DATA_LENGTH);
+        short dataOffset = ISO7816.OFFSET_CDATA;
+        verifySignedCardId(buffer, (short) (dataOffset + 1));
 
         // If the card is removed mid-operation, the JCSystem rolls back to the previous state.
         JCSystem.beginTransaction();
         try {
-            Util.arrayCopy(buffer, ISO7816.OFFSET_CDATA, memberId, (short) 0, (short) 4);
-            Util.arrayCopy(buffer, (short)(ISO7816.OFFSET_CDATA + 4), lastDate, (short) 0, (short) 4);
-            Util.arrayCopy(buffer, (short)(ISO7816.OFFSET_CDATA + 8), expiryDate, (short) 0, (short) 4);
+            Util.arrayCopy(buffer, (short) (dataOffset + 1), memberId, (short) 0, (short) 4);
+            Util.arrayCopy(buffer, (short)(dataOffset + 5), lastDate, (short) 0, (short) 4);
+            Util.arrayCopy(buffer, (short)(dataOffset + 9), expiryDate, (short) 0, (short) 4);
             dailyCounter = (byte) 0x00;
+            transactionCounter = (short) 0;
             currentState = STATE_ACTIVE;
             JCSystem.commitTransaction(); 
         } catch (Exception e) {
@@ -228,6 +256,14 @@ public final class MembershipApplet extends Applet {
     private void processBlock(APDU apdu, byte[] buffer) {
         if (currentState != STATE_ACTIVE)
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+
+        short bytesRead = receiveFullIncoming(apdu, buffer);
+        if (bytesRead != ProtocolConstants.ADMIN_BLOCK_PAYLOAD_LENGTH)
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+
+        verifyAuthenticatedAdminCommand(buffer, ProtocolConstants.OP_BLOCK,
+                ProtocolConstants.ADMIN_BLOCK_DATA_LENGTH);
+        verifySignedCardId(buffer, (short) (ISO7816.OFFSET_CDATA + 1));
         
         JCSystem.beginTransaction();
         try {
@@ -236,6 +272,74 @@ public final class MembershipApplet extends Applet {
         } catch (Exception e) {
             JCSystem.abortTransaction();
             ISOException.throwIt(ISO7816.SW_UNKNOWN);
+        }
+    }
+
+    private void processAdminChallenge(APDU apdu, byte[] buffer) {
+        rng.generateData(transientNc, (short) 0, ProtocolConstants.NONCE_LENGTH);
+        adminChallengeReady = (byte) 0x01;
+        Util.arrayCopyNonAtomic(transientNc, (short) 0, buffer, (short) 0,
+                ProtocolConstants.NONCE_LENGTH);
+        apdu.setOutgoingAndSend((short) 0, ProtocolConstants.NONCE_LENGTH);
+    }
+
+    private void verifyAuthenticatedAdminCommand(byte[] buffer, byte operation, short operationDataLength) {
+        if (adminChallengeReady != (byte) 0x01) {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+        adminChallengeReady = (byte) 0x00;
+
+        short dataOffset = ISO7816.OFFSET_CDATA;
+        short certOffset = (short) (dataOffset + operationDataLength);
+        short masterSignatureOffset = (short) (certOffset + ProtocolConstants.CERTIFICATE_BODY_LENGTH);
+        short adminSignatureOffset = (short) (masterSignatureOffset + ProtocolConstants.SIGNATURE_LENGTH);
+
+        if (buffer[dataOffset] != operation) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+
+        boolean masterSignatureValid;
+        try {
+            verifier.init(masterPublicKey, Signature.MODE_VERIFY);
+            masterSignatureValid = verifier.verify(buffer, certOffset,
+                    ProtocolConstants.CERTIFICATE_BODY_LENGTH,
+                    buffer, masterSignatureOffset, ProtocolConstants.SIGNATURE_LENGTH);
+        } catch (Exception e) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+            return;
+        }
+        if (!masterSignatureValid
+                || buffer[(short) (certOffset + ProtocolConstants.CERT_ROLE_OFFSET)]
+                != ProtocolConstants.ROLE_ADMIN_TERMINAL) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+
+        try {
+            terminalPublicKey.setModulus(buffer,
+                    (short) (certOffset + ProtocolConstants.CERT_MODULUS_OFFSET), (short) 64);
+            terminalPublicKey.setExponent(buffer,
+                    (short) (certOffset + ProtocolConstants.CERT_EXPONENT_OFFSET), (short) 3);
+            Util.arrayCopyNonAtomic(buffer, dataOffset, transientAuthData, (short) 0,
+                    operationDataLength);
+            Util.arrayCopyNonAtomic(transientNc, (short) 0, transientAuthData,
+                    operationDataLength, ProtocolConstants.NONCE_LENGTH);
+            verifier.init(terminalPublicKey, Signature.MODE_VERIFY);
+            if (!verifier.verify(transientAuthData, (short) 0,
+                    (short) (operationDataLength + ProtocolConstants.NONCE_LENGTH),
+                    buffer, adminSignatureOffset, ProtocolConstants.SIGNATURE_LENGTH)) {
+                ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+            }
+        } catch (ISOException e) {
+            throw e;
+        } catch (Exception e) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+    }
+
+    private void verifySignedCardId(byte[] buffer, short cardIdOffset) {
+        if (Util.arrayCompare(buffer, cardIdOffset, certC, ProtocolConstants.CERT_ID_OFFSET,
+                (short) 4) != (short) 0) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
     }
 
@@ -258,12 +362,14 @@ public final class MembershipApplet extends Applet {
         if (bytesRead != (short) 16) 
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
 
+        Util.arrayCopyNonAtomic(buffer, ISO7816.OFFSET_CDATA, transientNt, (short) 0,
+                ProtocolConstants.NONCE_LENGTH);
         rng.generateData(transientNc, (short) 0, (short) 16);
 
         signer.init(cardPrivateKey, Signature.MODE_SIGN);
         short sigLen = signer.sign(buffer, ISO7816.OFFSET_CDATA, (short) 16, buffer, (short) 16);
 
-        // Response: NC(16) || cardSignature(64) || Cert_C(135).
+        // Response: NC(16) || cardSignature(64) || Cert_C(136).
         Util.arrayCopy(transientNc, (short) 0, buffer, (short) 0, (short) 16);
         short certOffset = (short) (16 + sigLen);
         Util.arrayCopy(certC, (short) 0, buffer, certOffset, (short) certC.length);
@@ -278,21 +384,22 @@ public final class MembershipApplet extends Applet {
         byte[] buffer = apdu.getBuffer();
         short bytesRead = receiveFullIncoming(apdu, buffer);
 
-        // Payload: Sigma2(64) + Cert_T(71) + Sigma1_MT(64) + Date(4)
-        if (bytesRead != (short) 203)
+        // Payload: Sigma2(64) + Cert_T_Body(72) + Sigma1_MT(64) + Date(4)
+        if (bytesRead != ProtocolConstants.TIER2_STEP2_PAYLOAD_LENGTH)
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
 
         short sigma2Offset = ISO7816.OFFSET_CDATA;
         short certTOffset = (short) (ISO7816.OFFSET_CDATA + 64);
-        short sigma1Offset = (short) (ISO7816.OFFSET_CDATA + 135);
-        short dateOffset = (short) (ISO7816.OFFSET_CDATA + 199);
+        short sigma1Offset = (short) (certTOffset + ProtocolConstants.CERTIFICATE_BODY_LENGTH);
+        short dateOffset = (short) (sigma1Offset + ProtocolConstants.SIGNATURE_LENGTH);
 
         // Verify the terminal certificate using the master public key, then load PK_T.
         boolean masterSignatureValid;
         try {
             verifier.init(masterPublicKey, Signature.MODE_VERIFY);
-            masterSignatureValid = verifier.verify(buffer, certTOffset, (short) 71,
-                    buffer, sigma1Offset, (short) 64);
+            masterSignatureValid = verifier.verify(buffer, certTOffset,
+                    ProtocolConstants.CERTIFICATE_BODY_LENGTH,
+                    buffer, sigma1Offset, ProtocolConstants.SIGNATURE_LENGTH);
         } catch (Exception e) {
             ISOException.throwIt(SW_MASTER_SIGNATURE_EXCEPTION);
             return;
@@ -300,10 +407,16 @@ public final class MembershipApplet extends Applet {
         if (!masterSignatureValid) {
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
+        if (buffer[(short) (certTOffset + ProtocolConstants.CERT_ROLE_OFFSET)]
+                != ProtocolConstants.ROLE_CONTROLLED_ACCESS_TERMINAL) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
 
         try {
-            terminalPublicKey.setModulus(buffer, (short) (certTOffset + 4), (short) 64);
-            terminalPublicKey.setExponent(buffer, (short) (certTOffset + 68), (short) 3);
+            terminalPublicKey.setModulus(buffer,
+                    (short) (certTOffset + ProtocolConstants.CERT_MODULUS_OFFSET), (short) 64);
+            terminalPublicKey.setExponent(buffer,
+                    (short) (certTOffset + ProtocolConstants.CERT_EXPONENT_OFFSET), (short) 3);
         } catch (Exception e) {
             ISOException.throwIt(SW_TERMINAL_CERTIFICATE_PROBLEM);
             return;
@@ -360,14 +473,44 @@ public final class MembershipApplet extends Applet {
             } else {
                 dailyCounter++;
             }
+            transactionCounter++;
             JCSystem.commitTransaction();
         } catch (Exception e) {
             abortTransactionIfActive();
             ISOException.throwIt(SW_COUNTER_DATE_TRANSACTION_EXCEPTION);
         }
 
-        buffer[0] = dailyCounter;
-        apdu.setOutgoingAndSend((short) 0, (short) 1);
+        short signedLength = buildTier2ReceiptData(buffer, certTOffset, dateOffset);
+        buffer[0] = ProtocolConstants.RESULT_GRANTED;
+        buffer[1] = dailyCounter;
+        buffer[2] = (byte) (transactionCounter >> 8);
+        buffer[3] = (byte) transactionCounter;
+        signer.init(cardPrivateKey, Signature.MODE_SIGN);
+        signer.sign(transientAuthData, (short) 0, signedLength, buffer, (short) 4);
+        apdu.setOutgoingAndSend((short) 0, ProtocolConstants.TIER2_RECEIPT_LENGTH);
+    }
+
+    private short buildTier2ReceiptData(byte[] buffer, short certTOffset, short dateOffset) {
+        short offset = (short) 0;
+        transientAuthData[offset++] = ProtocolConstants.OP_T2_RESULT;
+        Util.arrayCopyNonAtomic(memberId, (short) 0, transientAuthData, offset, (short) 4);
+        offset += (short) 4;
+        Util.arrayCopyNonAtomic(buffer, (short) (certTOffset + ProtocolConstants.CERT_ID_OFFSET),
+                transientAuthData, offset, (short) 4);
+        offset += (short) 4;
+        Util.arrayCopyNonAtomic(buffer, dateOffset, transientAuthData, offset, (short) 4);
+        offset += (short) 4;
+        Util.arrayCopyNonAtomic(transientNt, (short) 0, transientAuthData, offset,
+                ProtocolConstants.NONCE_LENGTH);
+        offset += ProtocolConstants.NONCE_LENGTH;
+        Util.arrayCopyNonAtomic(transientNc, (short) 0, transientAuthData, offset,
+                ProtocolConstants.NONCE_LENGTH);
+        offset += ProtocolConstants.NONCE_LENGTH;
+        transientAuthData[offset++] = dailyCounter;
+        transientAuthData[offset++] = (byte) (transactionCounter >> 8);
+        transientAuthData[offset++] = (byte) transactionCounter;
+        transientAuthData[offset++] = ProtocolConstants.RESULT_GRANTED;
+        return offset;
     }
 
     private void processGetCert(APDU apdu, byte[] buffer) {

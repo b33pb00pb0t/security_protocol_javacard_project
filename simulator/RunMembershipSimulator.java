@@ -1,14 +1,17 @@
 import com.licel.jcardsim.base.Simulator;
 import applet.MembershipApplet;
+import applet.ProtocolConstants;
 import backend.ApduDateCodec;
 import backend.CardId;
 import javacard.framework.AID;
 import java.math.BigInteger;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.Signature;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.Scanner;
 
 /**
@@ -22,6 +25,8 @@ public final class RunMembershipSimulator {
     };
 
     private static final byte CLA_PROPRIETARY = (byte) 0xB0; 
+    private static KeyPair masterKeyPair;
+    private static KeyPair adminKeyPair;
 
     public static void main(String[] args) throws Exception {
         Simulator simulator = new Simulator();
@@ -78,7 +83,8 @@ public final class RunMembershipSimulator {
             KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
             keyGen.initialize(512);
 
-            KeyPair masterKeyPair = keyGen.generateKeyPair();
+            masterKeyPair = keyGen.generateKeyPair();
+            adminKeyPair = keyGen.generateKeyPair();
             KeyPair cardKeyPair = keyGen.generateKeyPair();
             
             RSAPrivateKey cardPriv = (RSAPrivateKey) cardKeyPair.getPrivate();
@@ -95,11 +101,19 @@ public final class RunMembershipSimulator {
             System.arraycopy(toFixedByteArray(masterPk.getPublicExponent(), 3), 0, masterPayload, 64, 3);
             sendCommand(sim, (byte)0x12, masterPayload, "Master Public Key Loading");
 
-            byte[] certData = new byte[135];
-            byte[] cardId = {0x00, 0x00, 0x00, 0x01};
-            System.arraycopy(cardId, 0, certData, 0, 4);
-            System.arraycopy(toFixedByteArray(cardPub.getModulus(), 64), 0, certData, 4, 64);
-            System.arraycopy(toFixedByteArray(cardPub.getPublicExponent(), 3), 0, certData, 68, 3);
+            byte[] certData = new byte[ProtocolConstants.CARD_CERTIFICATE_LENGTH];
+            byte[] cardId = CardId.toBytes("1234");
+            certData[ProtocolConstants.CERT_ROLE_OFFSET] = ProtocolConstants.ROLE_CARD;
+            System.arraycopy(cardId, 0, certData, ProtocolConstants.CERT_ID_OFFSET, 4);
+            System.arraycopy(toFixedByteArray(cardPub.getModulus(), 64), 0, certData,
+                    ProtocolConstants.CERT_MODULUS_OFFSET, 64);
+            System.arraycopy(toFixedByteArray(cardPub.getPublicExponent(), 3), 0, certData,
+                    ProtocolConstants.CERT_EXPONENT_OFFSET, 3);
+            Signature certificateSigner = Signature.getInstance("SHA1withRSA");
+            certificateSigner.initSign(masterKeyPair.getPrivate());
+            certificateSigner.update(certData, 0, ProtocolConstants.CERTIFICATE_BODY_LENGTH);
+            System.arraycopy(certificateSigner.sign(), 0, certData,
+                    ProtocolConstants.CERT_SIGNATURE_OFFSET, ProtocolConstants.SIGNATURE_LENGTH);
             sendCommand(sim, (byte)0x11, certData, "Certificate Loading");
 
             System.out.println("\n--- GENERATED CARD KEYS ---");
@@ -114,21 +128,93 @@ public final class RunMembershipSimulator {
 
     private static void runAdminActivate(Simulator sim) {
         System.out.println("\n[AT] Activating Card...");
-        // Activation: memberId(4) || currentDate(4) || expiryDate(4).
-        LocalDate currentDate = LocalDate.now();
-        byte[] payload = new byte[12];
-        System.arraycopy(CardId.toBytes("1234"), 0, payload, 0, 4);
-        System.arraycopy(ApduDateCodec.encode(currentDate), 0, payload, 4, 4);
-        System.arraycopy(ApduDateCodec.encode(currentDate.plusYears(1)), 0, payload, 8, 4);
-        sendCommand(sim, (byte)0x13, payload, "Card Activation");
+        try {
+            LocalDate currentDate = LocalDate.now();
+            byte[] operationData = new byte[ProtocolConstants.ADMIN_ACTIVATE_DATA_LENGTH];
+            operationData[0] = ProtocolConstants.OP_ACTIVATE;
+            System.arraycopy(CardId.toBytes("1234"), 0, operationData, 1, 4);
+            System.arraycopy(ApduDateCodec.encode(currentDate), 0, operationData, 5, 4);
+            System.arraycopy(ApduDateCodec.encode(currentDate.plusYears(1)), 0, operationData, 9, 4);
+            sendCommand(sim, (byte)0x13,
+                    buildAuthenticatedAdminPayload(sim, ProtocolConstants.OP_ACTIVATE, operationData),
+                    "Authenticated Card Activation");
+        } catch (Exception e) {
+            System.err.println("Error during Admin Activation: " + e.getMessage());
+        }
     }
 
     private static void runAdminBlock(Simulator sim) {
         System.out.println("\n[AT] Blocking Card...");
-        sendCommand(sim, (byte)0x14, null, "Card Blocking");
+        try {
+            byte[] operationData = new byte[ProtocolConstants.ADMIN_BLOCK_DATA_LENGTH];
+            operationData[0] = ProtocolConstants.OP_BLOCK;
+            System.arraycopy(CardId.toBytes("1234"), 0, operationData, 1, 4);
+            sendCommand(sim, (byte)0x14,
+                    buildAuthenticatedAdminPayload(sim, ProtocolConstants.OP_BLOCK, operationData),
+                    "Authenticated Card Blocking");
+        } catch (Exception e) {
+            System.err.println("Error during Admin Block: " + e.getMessage());
+        }
+    }
+
+    private static byte[] buildAuthenticatedAdminPayload(Simulator sim, byte operation,
+                                                         byte[] operationData) throws Exception {
+        if (masterKeyPair == null || adminKeyPair == null) {
+            throw new IllegalStateException("Run the Master provisioning phase first.");
+        }
+        byte[] nonce = sendCommandWithResponse(sim, (byte) 0x30, null, "Admin Challenge");
+        if (nonce.length != ProtocolConstants.NONCE_LENGTH) {
+            throw new IllegalStateException("Admin challenge returned " + nonce.length + " bytes");
+        }
+
+        byte[] adminCertificate = signedCertificate(ProtocolConstants.ROLE_ADMIN_TERMINAL,
+                new byte[] {0x0A, 0x0B, 0x0C, 0x0E}, (RSAPublicKey) adminKeyPair.getPublic());
+        byte[] signatureInput = new byte[operationData.length + nonce.length];
+        System.arraycopy(operationData, 0, signatureInput, 0, operationData.length);
+        System.arraycopy(nonce, 0, signatureInput, operationData.length, nonce.length);
+        byte[] adminSignature = sign(adminKeyPair, signatureInput);
+
+        int expectedLength = operation == ProtocolConstants.OP_ACTIVATE
+                ? ProtocolConstants.ADMIN_ACTIVATE_PAYLOAD_LENGTH
+                : ProtocolConstants.ADMIN_BLOCK_PAYLOAD_LENGTH;
+        byte[] payload = new byte[expectedLength];
+        System.arraycopy(operationData, 0, payload, 0, operationData.length);
+        System.arraycopy(adminCertificate, 0, payload, operationData.length, adminCertificate.length);
+        System.arraycopy(adminSignature, 0, payload, operationData.length + adminCertificate.length,
+                adminSignature.length);
+        return payload;
+    }
+
+    private static byte[] signedCertificate(byte role, byte[] id, RSAPublicKey publicKey) throws Exception {
+        byte[] certificate = new byte[ProtocolConstants.CARD_CERTIFICATE_LENGTH];
+        certificate[ProtocolConstants.CERT_ROLE_OFFSET] = role;
+        System.arraycopy(id, 0, certificate, ProtocolConstants.CERT_ID_OFFSET, 4);
+        System.arraycopy(toFixedByteArray(publicKey.getModulus(), 64), 0, certificate,
+                ProtocolConstants.CERT_MODULUS_OFFSET, 64);
+        System.arraycopy(toFixedByteArray(publicKey.getPublicExponent(), 3), 0, certificate,
+                ProtocolConstants.CERT_EXPONENT_OFFSET, 3);
+        System.arraycopy(sign(masterKeyPair, Arrays.copyOf(certificate,
+                ProtocolConstants.CERTIFICATE_BODY_LENGTH)), 0, certificate,
+                ProtocolConstants.CERT_SIGNATURE_OFFSET, ProtocolConstants.SIGNATURE_LENGTH);
+        return certificate;
+    }
+
+    private static byte[] sign(KeyPair keyPair, byte[] data) throws Exception {
+        Signature signature = Signature.getInstance("SHA1withRSA");
+        signature.initSign(keyPair.getPrivate());
+        signature.update(data);
+        byte[] signed = signature.sign();
+        if (signed.length != ProtocolConstants.SIGNATURE_LENGTH) {
+            throw new IllegalStateException("Expected 64-byte RSA signature, got " + signed.length);
+        }
+        return signed;
     }
 
     private static void sendCommand(Simulator sim, byte ins, byte[] data, String label) {
+        sendCommandWithResponse(sim, ins, data, label);
+    }
+
+    private static byte[] sendCommandWithResponse(Simulator sim, byte ins, byte[] data, String label) {
         int lc = (data != null) ? data.length : 0;
         byte[] apdu = new byte[5 + lc];
         apdu[0] = CLA_PROPRIETARY;
@@ -147,6 +233,7 @@ public final class RunMembershipSimulator {
         } else {
             System.out.println("    Status: FAILED");
         }
+        return Arrays.copyOf(response, response.length - 2);
     }
 
     private static byte[] toFixedByteArray(BigInteger val, int len) {

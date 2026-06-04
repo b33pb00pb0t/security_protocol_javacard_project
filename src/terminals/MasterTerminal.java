@@ -1,5 +1,7 @@
 package terminals;
 
+import applet.ProtocolConstants;
+
 import javax.smartcardio.CardException;
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
@@ -60,18 +62,20 @@ public class MasterTerminal extends BaseTerminal {
     private void loadCertificate(byte[] cardId, RSAPublicKey cardPubKey)
             throws Exception {
 
-        final int ID_LEN = 4;
         final int MOD_LEN = 64;
         final int EXP_LEN = 3;
-        final int SIG_LEN = 64;
-        final int DATA_LEN = 71;
-        final int CERT_LEN = 135;
+        final int SIG_LEN = ProtocolConstants.SIGNATURE_LENGTH;
+        final int DATA_LEN = ProtocolConstants.CERTIFICATE_BODY_LENGTH;
+        final int CERT_LEN = ProtocolConstants.CARD_CERTIFICATE_LENGTH;
 
         byte[] certData = new byte[CERT_LEN];
 
-        System.arraycopy(cardId, 0, certData, 0, ID_LEN);
-        System.arraycopy(toFixedByteArray(cardPubKey.getModulus(), MOD_LEN), 0, certData, 4, MOD_LEN);
-        System.arraycopy(toFixedByteArray(cardPubKey.getPublicExponent(), EXP_LEN), 0, certData, 68, EXP_LEN);
+        certData[ProtocolConstants.CERT_ROLE_OFFSET] = ProtocolConstants.ROLE_CARD;
+        System.arraycopy(cardId, 0, certData, ProtocolConstants.CERT_ID_OFFSET, 4);
+        System.arraycopy(toFixedByteArray(cardPubKey.getModulus(), MOD_LEN), 0, certData,
+                ProtocolConstants.CERT_MODULUS_OFFSET, MOD_LEN);
+        System.arraycopy(toFixedByteArray(cardPubKey.getPublicExponent(), EXP_LEN), 0, certData,
+                ProtocolConstants.CERT_EXPONENT_OFFSET, EXP_LEN);
 
         Signature sig = Signature.getInstance("SHA1withRSA", "BC");
         sig.initSign(masterKeyPair.getPrivate());
