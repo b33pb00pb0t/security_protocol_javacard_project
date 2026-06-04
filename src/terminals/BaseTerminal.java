@@ -21,8 +21,8 @@ public abstract class BaseTerminal {
     }
 
     protected static final byte[] APPLET_AID = {
-        (byte) 0xA0, (byte) 0x00, (byte) 0x00, (byte) 0x01, 
-        (byte) 0x02, (byte) 0x03, (byte) 0x01 
+    (byte) 0xA0, (byte) 0x00, (byte) 0x00, (byte) 0x00, 
+    (byte) 0x01, (byte) 0x02, (byte) 0x03, (byte) 0x02 
     };
 
     private static final byte INS_GET_CERT = (byte) 0x60;
