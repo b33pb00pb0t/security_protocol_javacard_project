@@ -29,6 +29,13 @@ public final class MembershipApplet extends Applet {
     private static final byte INS_T2_STEP2 = (byte) 0x22;
     private static final byte INS_GET_CERT = (byte) 0x60;
 
+    // Diagnostic status words for physical-card Tier 2 failures
+    private static final short SW_APDU_RECEIVE_PROBLEM = (short) 0x6F10;
+    private static final short SW_TERMINAL_CERTIFICATE_PROBLEM = (short) 0x6F11;
+    private static final short SW_MASTER_SIGNATURE_EXCEPTION = (short) 0x6F12;
+    private static final short SW_TERMINAL_SIGNATURE_EXCEPTION = (short) 0x6F13;
+    private static final short SW_COUNTER_DATE_TRANSACTION_EXCEPTION = (short) 0x6F14;
+
     // Lifecycle state constants
     private static final byte STATE_INITIALIZE = (byte) 0x00;
     private static final byte STATE_ACTIVE = (byte) 0x01;
@@ -125,6 +132,42 @@ public final class MembershipApplet extends Applet {
         }
     }
 
+    private short receiveFullIncoming(APDU apdu, byte[] buffer) {
+        short incomingLength = (short) (buffer[ISO7816.OFFSET_LC] & 0xFF);
+        short totalReceived = (short) 0;
+        short blockLength;
+        try {
+            blockLength = apdu.setIncomingAndReceive();
+            totalReceived = blockLength;
+            while (totalReceived < incomingLength) {
+                blockLength = apdu.receiveBytes((short) (ISO7816.OFFSET_CDATA + totalReceived));
+                if (blockLength <= (short) 0) {
+                    break;
+                }
+                totalReceived += blockLength;
+            }
+        } catch (ISOException e) {
+            throw e;
+        } catch (Exception e) {
+            ISOException.throwIt(SW_APDU_RECEIVE_PROBLEM);
+        }
+
+        if (totalReceived != incomingLength) {
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        }
+        return totalReceived;
+    }
+
+    private void abortTransactionIfActive() {
+        try {
+            if (JCSystem.getTransactionDepth() != (byte) 0) {
+                JCSystem.abortTransaction();
+            }
+        } catch (Exception ignored) {
+            // Preserve the original diagnostic status word.
+        }
+    }
+
     /* 
     private void processInitializeKey(APDU apdu, byte[] buffer) {
         if (currentState != STATE_INITIALIZE) ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
@@ -195,7 +238,7 @@ public final class MembershipApplet extends Applet {
         if (currentState != STATE_INITIALIZE)  
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
 
-        short bytesRead = apdu.setIncomingAndReceive();        
+        short bytesRead = apdu.setIncomingAndReceive();
         if (bytesRead != (short) 67) 
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         
@@ -365,7 +408,7 @@ public final class MembershipApplet extends Applet {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         
         byte[] buffer = apdu.getBuffer();
-        short bytesRead = apdu.setIncomingAndReceive();
+        short bytesRead = receiveFullIncoming(apdu, buffer);
 
         // Payload: Sigma2(64) + Cert_T(71) + Sigma1_MT(64) + Date(4)
         if (bytesRead != (short) 203)
@@ -377,38 +420,72 @@ public final class MembershipApplet extends Applet {
         short dateOffset = (short) (ISO7816.OFFSET_CDATA + 199);
 
         // Verify the terminal certificate using the master public key, then load PK_T.
-        verifier.init(masterPublicKey, Signature.MODE_VERIFY);
-        if (!verifier.verify(buffer, certTOffset, (short) 71, buffer, sigma1Offset, (short) 64)) {
+        boolean masterSignatureValid;
+        try {
+            verifier.init(masterPublicKey, Signature.MODE_VERIFY);
+            masterSignatureValid = verifier.verify(buffer, certTOffset, (short) 71,
+                    buffer, sigma1Offset, (short) 64);
+        } catch (Exception e) {
+            ISOException.throwIt(SW_MASTER_SIGNATURE_EXCEPTION);
+            return;
+        }
+        if (!masterSignatureValid) {
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
 
-        terminalPublicKey.setModulus(buffer, (short) (certTOffset + 4), (short) 64);
-        terminalPublicKey.setExponent(buffer, (short) (certTOffset + 68), (short) 3);
+        try {
+            terminalPublicKey.setModulus(buffer, (short) (certTOffset + 4), (short) 64);
+            terminalPublicKey.setExponent(buffer, (short) (certTOffset + 68), (short) 3);
+        } catch (Exception e) {
+            ISOException.throwIt(SW_TERMINAL_CERTIFICATE_PROBLEM);
+            return;
+        }
 
         // Verify Sigma2 over NC || Date, proving that the terminal owns SK_T.
-        Util.arrayCopy(transientNc, (short) 0, transientAuthData, (short) 0, (short) 16);
-        Util.arrayCopy(buffer, dateOffset, transientAuthData, (short) 16, (short) 4);
-        verifier.init(terminalPublicKey, Signature.MODE_VERIFY);
-        if (!verifier.verify(transientAuthData, (short) 0, (short) 20, buffer, sigma2Offset, (short) 64)) {
+        boolean terminalSignatureValid;
+        try {
+            Util.arrayCopyNonAtomic(transientNc, (short) 0, transientAuthData, (short) 0, (short) 16);
+            Util.arrayCopyNonAtomic(buffer, dateOffset, transientAuthData, (short) 16, (short) 4);
+            verifier.init(terminalPublicKey, Signature.MODE_VERIFY);
+            terminalSignatureValid = verifier.verify(transientAuthData, (short) 0, (short) 20,
+                    buffer, sigma2Offset, (short) 64);
+        } catch (Exception e) {
+            ISOException.throwIt(SW_TERMINAL_SIGNATURE_EXCEPTION);
+            return;
+        }
+        if (!terminalSignatureValid) {
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
 
         // Check subscription expiry. If today > expiryDate, the card becomes inactive.
-        if (Util.arrayCompare(buffer, dateOffset, expiryDate, (short) 0, (short) 4) > 0) {
-            JCSystem.beginTransaction();
-            currentState = STATE_INACTIVE;
-            JCSystem.commitTransaction();
+        short expiryComparison;
+        short dateCmp;
+        try {
+            expiryComparison = Util.arrayCompare(buffer, dateOffset, expiryDate, (short) 0, (short) 4);
+            dateCmp = Util.arrayCompare(buffer, dateOffset, lastDate, (short) 0, (short) 4);
+        } catch (Exception e) {
+            ISOException.throwIt(SW_COUNTER_DATE_TRANSACTION_EXCEPTION);
+            return;
+        }
+        if (expiryComparison > (short) 0) {
+            try {
+                JCSystem.beginTransaction();
+                currentState = STATE_INACTIVE;
+                JCSystem.commitTransaction();
+            } catch (Exception e) {
+                abortTransactionIfActive();
+                ISOException.throwIt(SW_COUNTER_DATE_TRANSACTION_EXCEPTION);
+            }
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
 
-        short dateCmp = Util.arrayCompare(buffer, dateOffset, lastDate, (short) 0, (short) 4);
         if (dateCmp == (short) 0 && (dailyCounter & 0xFF) >= 2) {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
 
         // Atomic counter update after the terminal is verified and the date is valid.
-        JCSystem.beginTransaction();
         try {
+            JCSystem.beginTransaction();
             if (dateCmp != (short) 0) {
                 Util.arrayCopy(buffer, dateOffset, lastDate, (short) 0, (short) 4);
                 dailyCounter = (byte) 0x01;
@@ -417,8 +494,8 @@ public final class MembershipApplet extends Applet {
             }
             JCSystem.commitTransaction();
         } catch (Exception e) {
-            JCSystem.abortTransaction();
-            ISOException.throwIt(ISO7816.SW_UNKNOWN);
+            abortTransactionIfActive();
+            ISOException.throwIt(SW_COUNTER_DATE_TRANSACTION_EXCEPTION);
         }
 
         // Return the updated counter to the terminal

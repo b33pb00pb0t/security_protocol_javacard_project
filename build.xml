@@ -1,7 +1,7 @@
 <project name="SportsCenter" default="build-cap" basedir=".">
     
-    <taskdef name="javacard" classname="pro.javacard.ant.JavaCard" 
-         classpath="${basedir}/lib/ant-javacard.jar"/>
+    <taskdef name="javacard" classname="pro.javacard.ant.JavaCard"
+         classpath="${basedir}/ant-javacard.jar"/>
 
     <target name="clean">
         <delete dir="build"/>
@@ -10,10 +10,20 @@
     <target name="init">
         <mkdir dir="build/classes-card"/>
         <mkdir dir="build/cap"/>
+        <mkdir dir="build/generated-card-source"/>
     </target>
 
     <target name="build-cap" depends="init">
-        <javac srcdir="src" destdir="build/classes-card" source="1.3" target="1.2" includeantruntime="false">
+        <copy todir="build/generated-card-source">
+            <fileset dir="src">
+                <include name="applet/**"/>
+            </fileset>
+        </copy>
+        <!-- JavaCard 2.2.1 accepts Java 1.4 class files, but @Override requires Java 5 source syntax. -->
+        <replace dir="build/generated-card-source" token="@Override" value=""/>
+
+        <javac srcdir="build/generated-card-source" destdir="build/classes-card"
+               source="1.3" target="1.2" includeantruntime="false">
             <include name="applet/**"/>
             <exclude name="terminals/**"/>
             <exclude name="backend/**"/>
@@ -23,8 +33,8 @@
         </javac>
         
         <javacard jckit="util/java_card_kit-2_2_1">
-            <cap aid="A000000001020301" package="applet" output="build/cap/applet.cap" classes="build/classes-card">
-                <applet class="applet.MembershipApplet" aid="A000000001020302"/>
+            <cap aid="A00000010203" package="applet" output="build/cap/applet.cap" classes="build/classes-card">
+                <applet class="applet.MembershipApplet" aid="A0000001020301"/>
             </cap>
         </javacard>
         <echo message="Build successful: .cap file generated."/>
@@ -32,7 +42,9 @@
 
     <target name="build-host">
         <mkdir dir="build/classes-host"/>
-        <javac srcdir="src" destdir="build/classes-host" includeantruntime="false">
+        <javac destdir="build/classes-host" source="1.8" target="1.8" includeantruntime="false">
+            <src path="src"/>
+            <src path="simulator"/>
             <classpath>
                 <pathelement location="util/java_card_kit-2_2_1/lib/api.jar"/>
                 <fileset dir="lib">
@@ -41,6 +53,28 @@
             </classpath>
         </javac>
         <echo message="Frontend and Terminal compiled successfully."/>
+    </target>
+
+    <target name="hardware-smoke" depends="build-host">
+        <java classname="tools.HardwareSmokeTest" fork="true" failonerror="true">
+            <classpath>
+                <pathelement location="build/classes-host"/>
+                <fileset dir="lib">
+                    <include name="*.jar"/>
+                </fileset>
+            </classpath>
+        </java>
+    </target>
+
+    <target name="simulator-regression" depends="build-host">
+        <java classname="tools.SimulatorRegressionTest" fork="true" failonerror="true">
+            <classpath>
+                <pathelement location="build/classes-host"/>
+                <fileset dir="lib">
+                    <include name="*.jar"/>
+                </fileset>
+            </classpath>
+        </java>
     </target>
 
 </project>

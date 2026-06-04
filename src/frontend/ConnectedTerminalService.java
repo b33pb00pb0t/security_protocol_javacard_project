@@ -1,10 +1,10 @@
 package frontend;
 
 import backend.BlockListRepository;
+import backend.CardGateway;
 import backend.CardId;
 import backend.CsvMemberRepository;
 import backend.AuditLogger;
-import backend.JCardSimGateway;
 import backend.MemberRecord;
 import backend.NoOpAuditLogger;
 import backend.TerminalOfflineCache;
@@ -22,14 +22,14 @@ public class ConnectedTerminalService implements TerminalService {
     private final CsvMemberRepository memberRepository;
     private final BlockListRepository blockListRepository;
     private final TerminalSyncService syncService;
-    private final JCardSimGateway cardGateway;
+    private final CardGateway cardGateway;
     private final AuditLogger auditLogger;
     private final TerminalOfflineCache terminalCache;
 
     public ConnectedTerminalService(CsvMemberRepository memberRepository,
                                     BlockListRepository blockListRepository,
                                     TerminalSyncService syncService,
-                                    JCardSimGateway cardGateway) {
+                                    CardGateway cardGateway) {
         this(memberRepository, blockListRepository, syncService, cardGateway, new NoOpAuditLogger(),
                 new TerminalOfflineCache());
     }
@@ -37,7 +37,7 @@ public class ConnectedTerminalService implements TerminalService {
     public ConnectedTerminalService(CsvMemberRepository memberRepository,
                                     BlockListRepository blockListRepository,
                                     TerminalSyncService syncService,
-                                    JCardSimGateway cardGateway,
+                                    CardGateway cardGateway,
                                     AuditLogger auditLogger) {
         this(memberRepository, blockListRepository, syncService, cardGateway, auditLogger,
                 new TerminalOfflineCache());
@@ -46,7 +46,7 @@ public class ConnectedTerminalService implements TerminalService {
     public ConnectedTerminalService(CsvMemberRepository memberRepository,
                                     BlockListRepository blockListRepository,
                                     TerminalSyncService syncService,
-                                    JCardSimGateway cardGateway,
+                                    CardGateway cardGateway,
                                     AuditLogger auditLogger,
                                     TerminalOfflineCache terminalCache) {
         this.memberRepository = memberRepository;
@@ -72,11 +72,12 @@ public class ConnectedTerminalService implements TerminalService {
             }
             if (!cardGateway.hasSession(normalized)) {
                 return finish("ADMIN", normalized, "ACTIVATE", false,
-                        "ERROR: Initialize simulator card " + normalized + " from the Master terminal first.");
+                        "ERROR: Initialize/select card " + normalized + " from the Master terminal first.");
             }
 
             LocalDate expiry = parseExpiryDate(expiryDate);
-            if (!cardGateway.isAppletActive(normalized)) {
+            if (!cardGateway.isAppletActive(normalized)
+                    || "HARDWARE".equals(cardGateway.getGatewayName())) {
                 cardGateway.activate(normalized, LocalDate.now(), expiry);
             }
             MemberRecord record = memberRepository.activate(normalized, expiryDate, phoneNumber);
@@ -132,7 +133,7 @@ public class ConnectedTerminalService implements TerminalService {
                 // A lost card may be reported before it has a backend member row.
             }
 
-            JCardSimGateway.CardAccessResult apduResult = cardGateway.blockIfPresent(normalized);
+            CardGateway.CardAccessResult apduResult = cardGateway.blockIfPresent(normalized);
             return finish("ADMIN", normalized, "BLOCK", apduResult.isSuccess(),
                     "Card " + normalized + " has been added to the Block List. " + apduResult.getMessage());
         } catch (Exception e) {
@@ -151,7 +152,8 @@ public class ConnectedTerminalService implements TerminalService {
             builder.append(" | Expiry=").append(record == null ? "N/A" : displayEmpty(record.getExpiryDate(), "N/A"));
             builder.append(" | Package=").append(record == null ? "N/A" : displayEmpty(record.getPackageType(), "N/A"));
             builder.append(" | Blocked=").append(blockListRepository.isBlocked(normalized));
-            builder.append(" | SimulatorSession=").append(cardGateway.hasSession(normalized));
+            builder.append(" | Gateway=").append(cardGateway.getGatewayName());
+            builder.append(" | CardSession=").append(cardGateway.hasSession(normalized));
             builder.append(" | AppletActive=").append(cardGateway.isAppletActive(normalized));
             builder.append(" | AccessCache=").append(terminalCache.getSnapshot().isSynced() ? "SYNCED" : "NOT_SYNCED");
             return finish("ADMIN", normalized, "READ_STATUS", true, builder.toString());
@@ -187,7 +189,8 @@ public class ConnectedTerminalService implements TerminalService {
             cardGateway.provision(normalized);
             MemberRecord record = memberRepository.ensureInitialized(normalized, "STANDARD");
             return finish("MASTER", normalized, "INITIALIZE", true,
-                    "Master Terminal initialized simulator card " + record.getMemberId()
+                    "Master Terminal initialized " + cardGateway.getGatewayName().toLowerCase()
+                            + " card " + record.getMemberId()
                             + " with package " + record.getPackageType() + ".");
         } catch (Exception e) {
             return finish("MASTER", memberId, "INITIALIZE", false, "ERROR: " + e.getMessage());
@@ -224,7 +227,8 @@ public class ConnectedTerminalService implements TerminalService {
                 memberRepository.ensureInitialized(normalized, "STANDARD");
             }
             return finish("MASTER", normalized, "INSTALL_CERTIFICATE", true,
-                    "Certificate installed for simulator card " + normalized + ".");
+                    "Certificate installed for " + cardGateway.getGatewayName().toLowerCase()
+                            + " card " + normalized + ".");
         } catch (Exception e) {
             return finish("MASTER", memberId, "INSTALL_CERTIFICATE", false, "ERROR: " + e.getMessage());
         }
@@ -233,7 +237,8 @@ public class ConnectedTerminalService implements TerminalService {
     @Override
     public String loadIssuerData() {
         return finish("MASTER", "", "LOAD_ISSUER_DATA", true,
-                "Issuer public data is ready for simulator card provisioning.");
+                "Issuer public data is ready for " + cardGateway.getGatewayName().toLowerCase()
+                        + " card provisioning.");
     }
 
     @Override
@@ -242,10 +247,11 @@ public class ConnectedTerminalService implements TerminalService {
             String normalized = CardId.normalize(memberId);
             if (!cardGateway.hasSession(normalized)) {
                 return finish("MASTER", normalized, "LOAD_ISSUER_DATA", false,
-                        "ERROR: Initialize simulator card " + normalized + " first.");
+                        "ERROR: Initialize/select card " + normalized + " first.");
             }
             return finish("MASTER", normalized, "LOAD_ISSUER_DATA", true,
-                    "Issuer public data loaded on simulator card " + normalized + ".");
+                    "Issuer public data loaded on " + cardGateway.getGatewayName().toLowerCase()
+                            + " card " + normalized + ".");
         } catch (Exception e) {
             return finish("MASTER", memberId, "LOAD_ISSUER_DATA", false, "ERROR: " + e.getMessage());
         }
@@ -280,7 +286,7 @@ public class ConnectedTerminalService implements TerminalService {
                         "ACCESS DENIED: " + policyError);
             }
 
-            JCardSimGateway.CardAccessResult result = tier2
+            CardGateway.CardAccessResult result = tier2
                     ? cardGateway.checkInTier2(normalized, LocalDate.now())
                     : cardGateway.checkInTier1(normalized);
             return finish("ACCESS", normalized, tier2 ? "CHECK_IN_T2" : "CHECK_IN_T1", result.isSuccess(),
@@ -308,10 +314,10 @@ public class ConnectedTerminalService implements TerminalService {
             return "Cached membership expired on " + record.getExpiryDate() + ".";
         }
         if (!cardGateway.hasSession(normalized)) {
-            return "Simulator card session does not exist. Initialize it in this app run first.";
+            return cardGateway.getGatewayName() + " card session does not exist. Initialize/select the card first.";
         }
         if (!cardGateway.isAppletActive(normalized)) {
-            return "Simulator card is not active in this app run. Activate it in the Admin terminal.";
+            return cardGateway.getGatewayName() + " card is not active. Activate it in the Admin terminal.";
         }
         return null;
     }

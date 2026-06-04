@@ -3,3 +3,11 @@
 *.class
 .gradle/
 pro/
+hardware_keys/
+master_public.key
+terminal_certificate_to_sign.bin
+terminal_certificate*.bin
+*.pkcs8
+*.x509
+*.cap
+build/

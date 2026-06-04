@@ -1,11 +1,7 @@
 package terminals;
 
 import javax.smartcardio.*;
-import java.util.Scanner;
 import java.security.*;
-import java.security.spec.RSAPublicKeySpec;
-import java.math.BigInteger;
-import java.nio.ByteBuffer;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 /**
@@ -35,8 +31,8 @@ public class OpenAccessTerminal extends BaseTerminal {
         try {
             //Retrieve and Verify Certificate using Master Public Key (SR2)
             // verifyAndGetIdFromCert() is inherited from BaseTerminal
-            byte[] certData = send(new CommandAPDU(CLA_PROPRIETARY, INS_GET_CERT, 0x00, 0x00)).getData();
-            byte[] memberId = verifyAndGetIdFromCert();
+            byte[] certData = getCardCertificate();
+            byte[] memberId = verifyAndGetIdFromCert(certData);
             
             String idHex = bytesToHex(memberId);
             System.out.println("[OAT] Card Authenticated. Member ID: " + idHex);
@@ -49,17 +45,7 @@ public class OpenAccessTerminal extends BaseTerminal {
 
             //Extract Card Public Key (PK_C) from Certificate
             // Structure: ID(4) + Modulus(64) + Exponent(3) + Signature(64)
-            byte[] modulusBytes = new byte[64];
-            byte[] exponentBytes = new byte[3];
-            System.arraycopy(certData, 4, modulusBytes, 0, 64);
-            System.arraycopy(certData, 68, exponentBytes, 0, 3);
-
-            KeyFactory kf = KeyFactory.getInstance("RSA", "BC");
-            RSAPublicKeySpec pubSpec = new RSAPublicKeySpec(
-                new BigInteger(1, modulusBytes),
-                new BigInteger(1, exponentBytes)
-            );
-            PublicKey cardPublicKey = kf.generatePublic(pubSpec);
+            PublicKey cardPublicKey = getCardPublicKeyFromCert(certData);
 
             //Generate 16-byte Nonce for Freshness (SR3)
             byte[] nonce = new byte[16];

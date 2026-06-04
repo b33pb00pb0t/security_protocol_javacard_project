@@ -19,7 +19,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
-public class JCardSimGateway {
+public class JCardSimGateway implements CardGateway {
     private static final byte CLA_PROPRIETARY = (byte) 0xB0;
     private static final byte INS_INITIALIZE_KEY = (byte) 0x10;
     private static final byte INS_LOAD_CERT = (byte) 0x11;
@@ -57,15 +57,23 @@ public class JCardSimGateway {
         }
     }
 
+    @Override
+    public String getGatewayName() {
+        return "SIMULATOR";
+    }
+
+    @Override
     public synchronized boolean hasSession(String memberId) {
         return sessions.containsKey(CardId.normalize(memberId));
     }
 
+    @Override
     public synchronized boolean isAppletActive(String memberId) {
         CardSession session = sessions.get(CardId.normalize(memberId));
         return session != null && session.appletActive;
     }
 
+    @Override
     public synchronized void provision(String memberId) {
         String normalized = CardId.normalize(memberId);
         if (sessions.containsKey(normalized)) {
@@ -98,6 +106,7 @@ public class JCardSimGateway {
         }
     }
 
+    @Override
     public synchronized void activate(String memberId, LocalDate currentDate, LocalDate expiryDate) {
         CardSession session = requireSession(memberId);
         byte[] payload = new byte[12];
@@ -108,6 +117,7 @@ public class JCardSimGateway {
         session.appletActive = true;
     }
 
+    @Override
     public synchronized CardAccessResult blockIfPresent(String memberId) {
         String normalized = CardId.normalize(memberId);
         CardSession session = sessions.get(normalized);
@@ -123,6 +133,7 @@ public class JCardSimGateway {
         return CardAccessResult.denied("Block APDU failed with SW=" + response.swHex());
     }
 
+    @Override
     public synchronized CardAccessResult checkInTier1(String memberId) {
         CardSession session = requireSession(memberId);
         byte[] terminalNonce = new byte[16];
@@ -153,6 +164,7 @@ public class JCardSimGateway {
         }
     }
 
+    @Override
     public synchronized CardAccessResult checkInTier2(String memberId, LocalDate currentDate) {
         CardSession session = requireSession(memberId);
         byte[] terminalNonce = new byte[16];
@@ -352,13 +364,9 @@ public class JCardSimGateway {
         }
     }
 
-    public static final class CardAccessResult {
-        private final boolean success;
-        private final String message;
-
+    public static final class CardAccessResult extends CardGateway.CardAccessResult {
         private CardAccessResult(boolean success, String message) {
-            this.success = success;
-            this.message = message;
+            super(success, message);
         }
 
         public static CardAccessResult success(String message) {
@@ -368,13 +376,6 @@ public class JCardSimGateway {
         public static CardAccessResult denied(String message) {
             return new CardAccessResult(false, message);
         }
-
-        public boolean isSuccess() {
-            return success;
-        }
-
-        public String getMessage() {
-            return message;
-        }
     }
+
 }

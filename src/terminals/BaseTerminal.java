@@ -20,10 +20,7 @@ public abstract class BaseTerminal {
         Security.addProvider(new BouncyCastleProvider());
     }
 
-    protected static final byte[] APPLET_AID = {
-        (byte) 0xA0, (byte) 0x00, (byte) 0x00, (byte) 0x01, 
-        (byte) 0x02, (byte) 0x03, (byte) 0x01 
-    };
+    protected static final byte[] APPLET_AID = configuredAppletAid();
 
     private static final byte INS_GET_CERT = (byte) 0x60;
 
@@ -40,21 +37,18 @@ public abstract class BaseTerminal {
      * Returns the verified Card ID (4 bytes).
      */
     protected byte[] verifyAndGetIdFromCert() throws Exception {
+        return verifyAndGetIdFromCert(getCardCertificate());
+    }
+
+    protected byte[] verifyAndGetIdFromCert(byte[] fullResponse) throws Exception {
         if (masterPublicKey == null) {
             throw new SecurityException("Master Public Key not loaded. Cannot verify card.");
         }
-
-        // 1. Fetch the certificate from the card
-        ResponseAPDU res = send(new CommandAPDU(0xB0, INS_GET_CERT, 0x00, 0x00, 256));
-        if (res.getSW() != 0x9000) {
-            throw new CardException("Failed to retrieve certificate. SW: " + Integer.toHexString(res.getSW()));
-        }
-
-        byte[] fullResponse = res.getData();
         // The certificate format as per MT design:
         // ID_C (4) + Modulus (64) + Exponent (3) + Signature_MT (64) = 135 bytes
-        if (fullResponse.length < 135) {
-            throw new SecurityException("Invalid certificate length received from card.");
+        if (fullResponse.length != 135) {
+            throw new SecurityException("Invalid certificate length received from card: "
+                    + fullResponse.length + "; expected 135");
         }
 
         ByteBuffer buffer = ByteBuffer.wrap(fullResponse);
@@ -73,7 +67,7 @@ public abstract class BaseTerminal {
         System.arraycopy(fullResponse, 0, signedData, 0, signedData.length);
 
         // 3. Verify the Master's signature on the card's data
-        Signature verifier = Signature.getInstance("SHA256withRSA", "BC");
+        Signature verifier = Signature.getInstance("SHA1withRSA", "BC");
         verifier.initVerify(masterPublicKey);
         verifier.update(signedData);
 
@@ -85,10 +79,26 @@ public abstract class BaseTerminal {
         return idC;
     }
 
+    protected byte[] getCardCertificate() throws CardException {
+        ResponseAPDU response = send(new CommandAPDU(0xB0, INS_GET_CERT, 0x00, 0x00, 135));
+        if (response.getSW() != 0x9000) {
+            throw new CardException("Failed to retrieve certificate. SW: "
+                    + String.format("%04X", response.getSW()));
+        }
+        if (response.getData().length != 135) {
+            throw new CardException("Card certificate response length was " + response.getData().length
+                    + "; expected 135");
+        }
+        return response.getData();
+    }
+
     /**
      * Helper to reconstruct the Card's Public Key from the verified certificate.
      */
     protected PublicKey getCardPublicKeyFromCert(byte[] fullCertResponse) throws Exception {
+        if (fullCertResponse == null || fullCertResponse.length != 135) {
+            throw new SecurityException("Card certificate must be exactly 135 bytes");
+        }
         ByteBuffer buffer = ByteBuffer.wrap(fullCertResponse);
         buffer.position(4); // Skip ID
         byte[] modBytes = new byte[64];
@@ -110,16 +120,30 @@ public abstract class BaseTerminal {
         try {
             TerminalFactory factory = TerminalFactory.getDefault();
             List<CardTerminal> terminals = factory.terminals().list();
-            if (terminals.isEmpty()) return false;
+            if (terminals.isEmpty()) {
+                System.err.println("[Terminal] No PC/SC smartcard readers found.");
+                return false;
+            }
 
             CardTerminal reader = terminals.get(0);
+            if (!reader.isCardPresent() && !reader.waitForCardPresent(10000)) {
+                System.err.println("[Terminal] No card inserted in reader: " + reader.getName());
+                return false;
+            }
             this.card = reader.connect("*");
             this.channel = this.card.getBasicChannel();
 
             CommandAPDU select = new CommandAPDU(0x00, 0xA4, 0x04, 0x00, APPLET_AID);
             ResponseAPDU res = channel.transmit(select);
+            if (res.getSW() != 0x9000) {
+                System.err.println("[Terminal] Applet SELECT failed with SW="
+                        + String.format("%04X", res.getSW())
+                        + " for AID " + bytesToHex(APPLET_AID)
+                        + ". Check build.xml, BaseTerminal and GP output.");
+            }
             return res.getSW() == 0x9000;
         } catch (CardException e) {
+            System.err.println("[Terminal] Card connection failed: " + e.getMessage());
             return false;
         }
     }
@@ -136,9 +160,29 @@ public abstract class BaseTerminal {
         return channel.transmit(cmd);
     }
 
-    protected String bytesToHex(byte[] bytes) {
+    protected static String bytesToHex(byte[] bytes) {
         StringBuilder sb = new StringBuilder();
         for (byte b : bytes) sb.append(String.format("%02X", b));
         return sb.toString();
+    }
+
+    private static byte[] configuredAppletAid() {
+        String value = System.getProperty("card.applet.aid");
+        if (value == null || value.trim().isEmpty()) {
+            value = System.getenv("CARD_APPLET_AID");
+        }
+        if (value == null || value.trim().isEmpty()) {
+            value = "A0000001020301";
+        }
+        String normalized = value.replace(" ", "").replace(":", "").toUpperCase();
+        if (normalized.length() < 10 || normalized.length() > 32 || normalized.length() % 2 != 0
+                || !normalized.matches("[0-9A-F]+")) {
+            throw new IllegalArgumentException("Applet AID must be 5-16 bytes of hexadecimal");
+        }
+        byte[] result = new byte[normalized.length() / 2];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = (byte) Integer.parseInt(normalized.substring(i * 2, i * 2 + 2), 16);
+        }
+        return result;
     }
 }

@@ -1,9 +1,11 @@
 package frontend;
 
 import backend.BlockListRepository;
+import backend.CardGateway;
 import backend.CsvAuditLogger;
 import backend.CsvBlockListRepository;
 import backend.CsvMemberRepository;
+import backend.HardwareCardGateway;
 import backend.JCardSimGateway;
 import backend.TerminalSyncService;
 
@@ -19,16 +21,20 @@ public class AppFrame extends JFrame {
     private final TerminalService terminalService;
 
     public AppFrame() {
+        this(false);
+    }
+
+    public AppFrame(boolean useHardware) {
         BlockListRepository blockListRepo = new CsvBlockListRepository("blocked_cards.csv");
         CsvMemberRepository memberRepo = new CsvMemberRepository("members.csv");
         TerminalSyncService syncService = new TerminalSyncService(blockListRepo);
-        JCardSimGateway cardGateway = new JCardSimGateway();
+        CardGateway cardGateway = useHardware ? new HardwareCardGateway() : new JCardSimGateway();
         CsvAuditLogger auditLogger = new CsvAuditLogger("audit_log.csv");
 
         this.authService = new AuthService(auditLogger);
         this.terminalService = new ConnectedTerminalService(memberRepo, blockListRepo, syncService, cardGateway, auditLogger);
 
-        setTitle("Sports Recreation Center - Terminal Frontend");
+        setTitle("Sports Recreation Center - " + cardGateway.getGatewayName() + " Terminal Frontend");
         setSize(800, 560);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);

@@ -128,6 +128,7 @@ public class MasterTerminal extends BaseTerminal {
 
         try {
             System.out.println("Connection OK! (Master Terminal)");
+            saveMasterPublicKey("master_public.key");
 
             KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA", "BC");
             keyGen.initialize(512);

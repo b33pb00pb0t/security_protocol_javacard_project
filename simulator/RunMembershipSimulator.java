@@ -1,11 +1,14 @@
 import com.licel.jcardsim.base.Simulator;
 import applet.MembershipApplet;
+import backend.ApduDateCodec;
+import backend.CardId;
 import javacard.framework.AID;
 import java.math.BigInteger;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
+import java.time.LocalDate;
 import java.util.Scanner;
 
 /**
@@ -124,11 +127,11 @@ public final class RunMembershipSimulator {
     private static void runAdminActivate(Simulator sim) {
         System.out.println("\n[AT] Activating Card...");
         // Payload: Member ID (4 bytes) + activation date (4 bytes) + expiry date (4 bytes)
-        byte[] payload = {
-            0x00, 0x00, 0x04, (byte)0xD2, // ID 1234
-            0x20, 0x26, 0x06, 0x03,       // Activation date 2026-06-03
-            0x20, 0x26, 0x12, 0x31        // Expiry date 2026-12-31
-        };
+        LocalDate currentDate = LocalDate.now();
+        byte[] payload = new byte[12];
+        System.arraycopy(CardId.toBytes("1234"), 0, payload, 0, 4);
+        System.arraycopy(ApduDateCodec.encode(currentDate), 0, payload, 4, 4);
+        System.arraycopy(ApduDateCodec.encode(currentDate.plusYears(1)), 0, payload, 8, 4);
         sendCommand(sim, (byte)0x13, payload, "Card Activation");
     }
 

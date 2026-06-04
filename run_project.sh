@@ -25,4 +25,18 @@ for jar in lib/*.jar; do
     CP="$CP$SEP$jar"
 done
 
-java -cp "$CP" frontend.Main
+case "${1:-}" in
+    --simulator)
+        java -cp "$CP" RunMembershipSimulator
+        ;;
+    --hardware-smoke)
+        shift
+        java -cp "$CP" tools.HardwareSmokeTest "$@"
+        ;;
+    --hardware)
+        java -cp "$CP" frontend.Main --hardware
+        ;;
+    *)
+        java -cp "$CP" frontend.Main "$@"
+        ;;
+esac
