@@ -220,7 +220,9 @@ public class ConnectedTerminalService implements TerminalService {
                         "ERROR: Card " + normalized + " is BLOCKED. Cannot install certificate.");
             }
             cardGateway.provision(normalized);
-            memberRepository.ensureInitialized(normalized, "STANDARD");
+            if (memberRepository.find(normalized) == null) {
+                memberRepository.ensureInitialized(normalized, "STANDARD");
+            }
             return finish("MASTER", normalized, "INSTALL_CERTIFICATE", true,
                     "Certificate installed for simulator card " + normalized + ".");
         } catch (Exception e) {
