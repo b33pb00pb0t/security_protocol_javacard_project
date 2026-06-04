@@ -19,6 +19,10 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * In-memory CardGateway implementation. Each member ID owns an isolated
+ * JCardSim applet session for the lifetime of the host process.
+ */
 public class JCardSimGateway implements CardGateway {
     private static final byte CLA_PROPRIETARY = (byte) 0xB0;
     private static final byte INS_INITIALIZE_KEY = (byte) 0x10;
@@ -92,7 +96,7 @@ public class JCardSimGateway implements CardGateway {
             keyGen.initialize(512);
             KeyPair cardKeyPair = keyGen.generateKeyPair();
             byte[] certC = buildCardCertificate(normalized, (RSAPublicKey) cardKeyPair.getPublic());
-            CardSession session = new CardSession(simulator, cardKeyPair, certC);
+            CardSession session = new CardSession(simulator);
 
             requireSuccess(transmit(session, INS_INITIALIZE_KEY, buildPrivateKeyPayload(cardKeyPair)),
                     "Private key initialization");
@@ -333,16 +337,10 @@ public class JCardSimGateway implements CardGateway {
     private static final class CardSession {
         private final Simulator simulator;
         private boolean appletActive;
-        @SuppressWarnings("unused")
-        private final KeyPair cardKeyPair;
-        @SuppressWarnings("unused")
-        private final byte[] certC;
 
-        private CardSession(Simulator simulator, KeyPair cardKeyPair, byte[] certC) {
+        private CardSession(Simulator simulator) {
             this.simulator = simulator;
             this.appletActive = false;
-            this.cardKeyPair = cardKeyPair;
-            this.certC = certC;
         }
     }
 

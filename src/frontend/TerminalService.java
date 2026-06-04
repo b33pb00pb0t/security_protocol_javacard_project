@@ -23,8 +23,6 @@ public interface TerminalService {
 
     String installCertificate(String memberId);
 
-    String loadIssuerData();
-
     String loadIssuerData(String memberId);
 
     String syncTerminals();

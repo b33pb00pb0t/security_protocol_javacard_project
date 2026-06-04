@@ -11,6 +11,10 @@ import java.nio.file.Paths;
 import java.math.BigInteger;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
+/**
+ * Shared PC/SC support for the standalone terminal command-line demos.
+ * The GUI hardware path uses HardwareCardGateway instead.
+ */
 public abstract class BaseTerminal {
     protected Card card;
     protected CardChannel channel;
@@ -44,8 +48,7 @@ public abstract class BaseTerminal {
         if (masterPublicKey == null) {
             throw new SecurityException("Master Public Key not loaded. Cannot verify card.");
         }
-        // The certificate format as per MT design:
-        // ID_C (4) + Modulus (64) + Exponent (3) + Signature_MT (64) = 135 bytes
+        // Cert_C: ID_C(4) || modulus(64) || exponent(3) || masterSignature(64).
         if (fullResponse.length != 135) {
             throw new SecurityException("Invalid certificate length received from card: "
                     + fullResponse.length + "; expected 135");
@@ -62,11 +65,9 @@ public abstract class BaseTerminal {
         buffer.get(exponentC);
         buffer.get(signatureMT);
 
-        // 2. Prepare the data that was signed (ID_C + Modulus + Exponent)
         byte[] signedData = new byte[4 + 64 + 3];
         System.arraycopy(fullResponse, 0, signedData, 0, signedData.length);
 
-        // 3. Verify the Master's signature on the card's data
         Signature verifier = Signature.getInstance("SHA1withRSA", "BC");
         verifier.initVerify(masterPublicKey);
         verifier.update(signedData);
@@ -92,15 +93,12 @@ public abstract class BaseTerminal {
         return response.getData();
     }
 
-    /**
-     * Helper to reconstruct the Card's Public Key from the verified certificate.
-     */
     protected PublicKey getCardPublicKeyFromCert(byte[] fullCertResponse) throws Exception {
         if (fullCertResponse == null || fullCertResponse.length != 135) {
             throw new SecurityException("Card certificate must be exactly 135 bytes");
         }
         ByteBuffer buffer = ByteBuffer.wrap(fullCertResponse);
-        buffer.position(4); // Skip ID
+        buffer.position(4);
         byte[] modBytes = new byte[64];
         byte[] expBytes = new byte[3];
         buffer.get(modBytes);
@@ -113,8 +111,6 @@ public abstract class BaseTerminal {
         KeyFactory kf = KeyFactory.getInstance("RSA", "BC");
         return kf.generatePublic(spec);
     }
-
-    // --- Standard Connectivity Methods ---
 
     public boolean connect() {
         try {
@@ -167,6 +163,8 @@ public abstract class BaseTerminal {
     }
 
     private static byte[] configuredAppletAid() {
+        // The override lets standalone terminals address an older installed applet
+        // without changing the canonical AID used by new CAP builds.
         String value = System.getProperty("card.applet.aid");
         if (value == null || value.trim().isEmpty()) {
             value = System.getenv("CARD_APPLET_AID");

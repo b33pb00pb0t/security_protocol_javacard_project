@@ -12,13 +12,10 @@ import java.time.LocalDate;
 import java.util.Scanner;
 
 /**
- * Harness for simulating the Sports Center Membership protocol.
- * This class coordinates the interaction between the Applet logic
- * and the simulated Master/Administrator terminals.
+ * Interactive raw-APDU lifecycle demo. The GUI and SimulatorRegressionTest
+ * use JCardSimGateway for the complete simulator workflow.
  */
 public final class RunMembershipSimulator {
-    
-    // AID defined in your BaseTerminal and Applet sources
     private static final byte[] AID_BYTES = {
         (byte) 0xA0, (byte) 0x00, (byte) 0x00, (byte) 0x01, 
         (byte) 0x02, (byte) 0x03, (byte) 0x01 
@@ -27,14 +24,11 @@ public final class RunMembershipSimulator {
     private static final byte CLA_PROPRIETARY = (byte) 0xB0; 
 
     public static void main(String[] args) throws Exception {
-        // 1. Initialize Simulator and Applet
         Simulator simulator = new Simulator();
-        // Install the applet and capture the boolean result
         AID appletAID = new AID(AID_BYTES, (short) 0, (byte) AID_BYTES.length);
 
         Object result = simulator.installApplet(appletAID, MembershipApplet.class);
 
-        // 3. Print the operation success in English
         if (result != null) {
             System.out.println("Applet Installation: SUCCESS (SW: 9000)");
         } else {
@@ -82,18 +76,14 @@ public final class RunMembershipSimulator {
             System.out.println("\n[MT] Starting Provisioning (Generating NEW keys)...");
 
             KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
-            keyGen.initialize(512); // standard 512-bit for your applet
+            keyGen.initialize(512);
 
-            // Generating pairs
             KeyPair masterKeyPair = keyGen.generateKeyPair();
             KeyPair cardKeyPair = keyGen.generateKeyPair();
             
-            // Extracting components
             RSAPrivateKey cardPriv = (RSAPrivateKey) cardKeyPair.getPrivate();
             RSAPublicKey cardPub = (RSAPublicKey) cardKeyPair.getPublic();
             RSAPublicKey masterPk = (RSAPublicKey) masterKeyPair.getPublic();
-
-            // --- COMMAND SENDING ---
 
             byte[] initPayload = new byte[128];
             System.arraycopy(toFixedByteArray(cardPriv.getModulus(), 64), 0, initPayload, 0, 64);
@@ -112,7 +102,6 @@ public final class RunMembershipSimulator {
             System.arraycopy(toFixedByteArray(cardPub.getPublicExponent(), 3), 0, certData, 68, 3);
             sendCommand(sim, (byte)0x11, certData, "Certificate Loading");
 
-            // --- DEBUG PRINT ---
             System.out.println("\n--- GENERATED CARD KEYS ---");
             System.out.println("Modulus: " + toHexString(cardPub.getModulus()));
             System.out.println("Public Exponent:  " + cardPub.getPublicExponent());
@@ -123,10 +112,9 @@ public final class RunMembershipSimulator {
         }
     }
 
-    // --- ADMIN TERMINAL LOGIC (Adapted from Source 2) ---
     private static void runAdminActivate(Simulator sim) {
         System.out.println("\n[AT] Activating Card...");
-        // Payload: Member ID (4 bytes) + activation date (4 bytes) + expiry date (4 bytes)
+        // Activation: memberId(4) || currentDate(4) || expiryDate(4).
         LocalDate currentDate = LocalDate.now();
         byte[] payload = new byte[12];
         System.arraycopy(CardId.toBytes("1234"), 0, payload, 0, 4);
@@ -137,17 +125,16 @@ public final class RunMembershipSimulator {
 
     private static void runAdminBlock(Simulator sim) {
         System.out.println("\n[AT] Blocking Card...");
-        sendCommand(sim, (byte)0x14, null, "Card Blocking"); //[cite: 1, 2]
+        sendCommand(sim, (byte)0x14, null, "Card Blocking");
     }
 
-    // --- HELPER METHODS ---
     private static void sendCommand(Simulator sim, byte ins, byte[] data, String label) {
         int lc = (data != null) ? data.length : 0;
         byte[] apdu = new byte[5 + lc];
         apdu[0] = CLA_PROPRIETARY;
         apdu[1] = ins;
-        apdu[2] = 0x00; // P1
-        apdu[3] = 0x00; // P2
+        apdu[2] = 0x00;
+        apdu[3] = 0x00;
         apdu[4] = (byte) lc;
         if (data != null) System.arraycopy(data, 0, apdu, 5, lc);
 
@@ -172,6 +159,6 @@ public final class RunMembershipSimulator {
     }
 
     private static String toHexString(BigInteger val) {
-        return String.format("%0128x", val); // Forza 128 caratteri hex per moduli a 512 bit
+        return String.format("%0128x", val);
     }
 }

@@ -18,6 +18,8 @@ public final class HardwareSmokeTest {
     public static void main(String[] args) {
         List<String> commandArguments = new ArrayList<>(Arrays.asList(args));
         boolean allowCardModification = removeFlag(commandArguments, ALLOW_MODIFICATION_FLAG);
+        // Prevent accidental provisioning, state transitions, or counter updates during
+        // the default SELECT-only hardware check.
         if (requiresCardModification(commandArguments) && !allowCardModification) {
             throw new IllegalArgumentException("State-changing hardware commands require "
                     + ALLOW_MODIFICATION_FLAG);

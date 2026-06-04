@@ -80,6 +80,8 @@ public class ConnectedTerminalService implements TerminalService {
                     || "HARDWARE".equals(cardGateway.getGatewayName())) {
                 cardGateway.activate(normalized, LocalDate.now(), expiry);
             }
+            // Phone and package details are backend policy data; the applet activation
+            // contract contains only member ID, current date, and expiry date.
             MemberRecord record = memberRepository.activate(normalized, expiryDate, phoneNumber);
             return finish("ADMIN", normalized, "ACTIVATE", true,
                     "Card " + record.getMemberId() + " activated until " + record.getExpiryDate()
@@ -232,13 +234,6 @@ public class ConnectedTerminalService implements TerminalService {
         } catch (Exception e) {
             return finish("MASTER", memberId, "INSTALL_CERTIFICATE", false, "ERROR: " + e.getMessage());
         }
-    }
-
-    @Override
-    public String loadIssuerData() {
-        return finish("MASTER", "", "LOAD_ISSUER_DATA", true,
-                "Issuer public data is ready for " + cardGateway.getGatewayName().toLowerCase()
-                        + " card provisioning.");
     }
 
     @Override

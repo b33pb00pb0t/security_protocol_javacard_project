@@ -1,18 +1,19 @@
 package terminals;
 
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import javax.smartcardio.*;
-import java.security.*;
+import javax.smartcardio.CardException;
+import javax.smartcardio.CommandAPDU;
+import javax.smartcardio.ResponseAPDU;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.Signature;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.io.FileOutputStream;
 import java.math.BigInteger;
 
 public class MasterTerminal extends BaseTerminal {
-    static {
-        Security.addProvider(new BouncyCastleProvider());
-    }
-
     private static final byte CLA_PROPRIETARY = (byte) 0xB0;
     private static final byte INS_INITIALIZE_KEY = (byte) 0x10;
     private static final byte INS_LOAD_CERT = (byte) 0x11;
@@ -26,16 +27,14 @@ public class MasterTerminal extends BaseTerminal {
         this.masterKeyPair = keyGen.generateKeyPair();
     }
 
-    //save master public key to file for Terminals usage
     public void saveMasterPublicKey(String filePath) throws Exception {
         byte[] pubKeyBytes = masterKeyPair.getPublic().getEncoded();
         try (FileOutputStream fos = new FileOutputStream(filePath)) {
             fos.write(pubKeyBytes);
         }
-        System.out.println("[MT] Master Public Key salvata in: " + filePath);
+        System.out.println("[MT] Master Public Key saved to: " + filePath);
     }
 
-    //APPLET OPERATIONS
     private void initializeKey(KeyPair cardKeyPair) throws CardException {
         RSAPrivateKey privateKey = (RSAPrivateKey) cardKeyPair.getPrivate();
         byte[] payload = new byte[128];
@@ -74,7 +73,6 @@ public class MasterTerminal extends BaseTerminal {
         System.arraycopy(toFixedByteArray(cardPubKey.getModulus(), MOD_LEN), 0, certData, 4, MOD_LEN);
         System.arraycopy(toFixedByteArray(cardPubKey.getPublicExponent(), EXP_LEN), 0, certData, 68, EXP_LEN);
 
-        // Firma con la master private key
         Signature sig = Signature.getInstance("SHA1withRSA", "BC");
         sig.initSign(masterKeyPair.getPrivate());
         sig.update(certData, 0, DATA_LEN);
@@ -97,10 +95,6 @@ public class MasterTerminal extends BaseTerminal {
         ResponseAPDU res = send(new CommandAPDU(CLA_PROPRIETARY, INS_LOAD_CERT, 0x00, 0x00, certData));
         handleResponse(res, "Certificate Loading");
     }
-    /////////////////// end of applet operations
-
-
-    // uility functions
     private static byte[] toFixedByteArray(BigInteger val, int len) {
         byte[] src = val.toByteArray();
         byte[] dest = new byte[len];
@@ -117,9 +111,6 @@ public class MasterTerminal extends BaseTerminal {
             System.err.println("[MT] " + opName + " failed. SW: " + Integer.toHexString(res.getSW()));
         }
     }
-    /////////////////// end of utility functions
-    
-
     public void startProcess() {
         if (!connect()) {
             System.err.println("[MT] Failed to connect to card.");

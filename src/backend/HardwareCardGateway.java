@@ -28,6 +28,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+/**
+ * Physical-card CardGateway implementation using the JVM PC/SC API.
+ * Hardware credentials persist under hardware_keys/ so later sessions can
+ * authenticate cards provisioned by an earlier run.
+ */
 public class HardwareCardGateway implements CardGateway {
     private static final byte CLA_PROPRIETARY = (byte) 0xB0;
     private static final byte INS_INITIALIZE_KEY = (byte) 0x10;
@@ -598,6 +603,7 @@ public class HardwareCardGateway implements CardGateway {
     }
 
     private static byte[] configuredAppletAid() {
+        // The override supports cards that still contain the legacy applet AID.
         String configured = System.getProperty("card.applet.aid");
         if (blankToNull(configured) == null) {
             configured = System.getenv("CARD_APPLET_AID");

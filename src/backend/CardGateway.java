@@ -2,6 +2,10 @@ package backend;
 
 import java.time.LocalDate;
 
+/**
+ * Transport boundary used by the frontend service so the same workflow can
+ * target either an in-memory JCardSim card or a physical JavaCard.
+ */
 public interface CardGateway {
     String getGatewayName();
 
