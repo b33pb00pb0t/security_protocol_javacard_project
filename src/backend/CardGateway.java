@@ -17,6 +17,8 @@ public interface CardGateway {
 
     void provision();
 
+    CardAccessResult resetCard();
+
     void activate(String memberId, LocalDate currentDate, LocalDate expiryDate);
 
     CardAccessResult blockIfPresent(String memberId);

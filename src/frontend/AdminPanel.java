@@ -42,6 +42,7 @@ public class AdminPanel extends JPanel {
         JButton lostButton = new JButton("Report Lost/Stolen");
         JButton statusButton = new JButton("Read Card Status");
         JButton viewBlockedButton = new JButton("View Blocked Cards");
+        JButton syncButton = new JButton("Sync Terminals");
         JButton logoutButton = new JButton("Logout");
 
         buttonPanel.add(activateButton);
@@ -50,6 +51,7 @@ public class AdminPanel extends JPanel {
         buttonPanel.add(lostButton);
         buttonPanel.add(statusButton);
         buttonPanel.add(viewBlockedButton);
+        buttonPanel.add(syncButton);
         buttonPanel.add(logoutButton);
 
         JPanel centerPanel = new JPanel(new BorderLayout(8, 8));
@@ -83,6 +85,9 @@ public class AdminPanel extends JPanel {
 
         viewBlockedButton.addActionListener(e ->
                 log(terminalService.viewBlockedCards()));
+
+        syncButton.addActionListener(e ->
+                log(terminalService.syncTerminals()));
 
         logoutButton.addActionListener(e -> appFrame.showLogin());
     }

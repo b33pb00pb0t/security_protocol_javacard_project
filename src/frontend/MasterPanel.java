@@ -19,13 +19,15 @@ public class MasterPanel extends JPanel {
         title.setFont(new Font("Arial", Font.BOLD, 22));
         add(title, BorderLayout.NORTH);
 
-        JPanel buttonPanel = new JPanel(new GridLayout(1, 3, 8, 8));
+        JPanel buttonPanel = new JPanel(new GridLayout(2, 2, 8, 8));
 
         JButton initializeButton = new JButton("Initialize Card");
+        JButton resetButton = new JButton("Reset Card");
         JButton statusButton = new JButton("Read Card Status");
         JButton logoutButton = new JButton("Logout");
 
         buttonPanel.add(initializeButton);
+        buttonPanel.add(resetButton);
         buttonPanel.add(statusButton);
         buttonPanel.add(logoutButton);
 
@@ -44,6 +46,17 @@ public class MasterPanel extends JPanel {
 
         initializeButton.addActionListener(e ->
                 log(terminalService.initializeCard()));
+
+        resetButton.addActionListener(e -> {
+            int result = JOptionPane.showConfirmDialog(this,
+                    "This deletes this project's applet state from the selected card and reinstalls a fresh applet. Continue?",
+                    "Reset Card",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+            if (result == JOptionPane.YES_OPTION) {
+                log(terminalService.resetCard());
+            }
+        });
 
         statusButton.addActionListener(e ->
                 log(terminalService.readInitializedCardStatus()));

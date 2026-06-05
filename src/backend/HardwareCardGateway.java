@@ -2,6 +2,9 @@ package backend;
 
 import applet.ProtocolConstants;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.InputStreamReader;
 import javax.smartcardio.Card;
 import javax.smartcardio.CardChannel;
 import javax.smartcardio.CardException;
@@ -53,8 +56,12 @@ public class HardwareCardGateway implements CardGateway {
             (byte) 0xA0, (byte) 0x00, (byte) 0x00, (byte) 0x01,
             (byte) 0x02, (byte) 0x03, (byte) 0x01
     };
+    private static final String CANONICAL_APPLET_AID_HEX = "A0000001020301";
+    private static final String PACKAGE_AID_HEX = "A00000010203";
 
     private static final Path HARDWARE_KEY_DIRECTORY = Paths.get("hardware_keys");
+    private static final Path CAP_PATH = Paths.get("build", "cap", "applet.cap");
+    private static final Path GP_PATH = Paths.get("util", "gp", "gp.jar");
     private static final long DEFAULT_CARD_WAIT_MILLIS = 10000L;
 
     private final SecureRandom random = new SecureRandom();
@@ -269,6 +276,41 @@ public class HardwareCardGateway implements CardGateway {
             provisionedInThisSession = true;
         } catch (Exception e) {
             throw new IllegalStateException("Failed to provision blank physical card: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public synchronized CardAccessResult resetCard() {
+        try {
+            disconnect(false);
+            if (!Files.exists(GP_PATH)) {
+                return CardAccessResult.denied("GlobalPlatformPro not found at " + GP_PATH);
+            }
+            if (!Files.exists(CAP_PATH)) {
+                return CardAccessResult.denied("CAP not found at " + CAP_PATH
+                        + ". Run ant clean build-cap build-host first.");
+            }
+
+            StringBuilder log = new StringBuilder();
+            runGp(log, "--delete", getAppletAidHex(), "--force");
+            if (!CANONICAL_APPLET_AID_HEX.equals(getAppletAidHex())) {
+                runGp(log, "--delete", CANONICAL_APPLET_AID_HEX, "--force");
+            }
+            runGp(log, "--delete", PACKAGE_AID_HEX, "--force");
+            int installExit = runGp(log, "--install", CAP_PATH.toString());
+            if (installExit != 0) {
+                return CardAccessResult.denied("Hardware reset failed while reinstalling CAP. " + summarizeGp(log));
+            }
+
+            boundMemberId = null;
+            appletActive = Boolean.FALSE;
+            provisionedInThisSession = false;
+            connect();
+            return CardAccessResult.success("Physical card applet deleted and reinstalled. "
+                    + "Persistent applet state is fresh.");
+        } catch (Exception e) {
+            disconnect(false);
+            return CardAccessResult.denied(e.getMessage());
         }
     }
 
@@ -776,6 +818,36 @@ public class HardwareCardGateway implements CardGateway {
         return toHex(Arrays.copyOfRange(bytes, 0, partLength))
                 + "..."
                 + toHex(Arrays.copyOfRange(bytes, bytes.length - partLength, bytes.length));
+    }
+
+    private int runGp(StringBuilder log, String... arguments) throws Exception {
+        List<String> command = new ArrayList<>();
+        command.add("java");
+        command.add("-jar");
+        command.add(GP_PATH.toString());
+        command.addAll(Arrays.asList(arguments));
+
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.directory(new File("."));
+        processBuilder.redirectErrorStream(true);
+        Process process = processBuilder.start();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                log.append(line).append('\n');
+            }
+        }
+        int exit = process.waitFor();
+        log.append("gp ").append(Arrays.toString(arguments)).append(" exit=").append(exit).append('\n');
+        return exit;
+    }
+
+    private static String summarizeGp(StringBuilder log) {
+        String value = log.toString().replace('\r', ' ').replace('\n', ' ').trim();
+        if (value.length() <= 500) {
+            return value;
+        }
+        return value.substring(value.length() - 500);
     }
 
     private void debugTier2(String message) {

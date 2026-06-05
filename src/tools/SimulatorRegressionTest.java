@@ -82,6 +82,9 @@ public final class SimulatorRegressionTest {
         requireContains(service.checkInTier1(memberId), "ACCESS DENIED", "post-block access policy");
         requireContains(service.activateCard(memberId, today.plusYears(2)
                 .format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)), "BLOCKED", "blocked activation policy");
+        requireContains(service.resetCard(), "RESET COMPLETE", "simulator reset");
+        require(!gateway.hasInitializedCard() && !gateway.hasSession(memberId),
+                "Simulator reset did not clear initialized/session state");
         System.out.println("Connected service flow: PASS");
     }
 

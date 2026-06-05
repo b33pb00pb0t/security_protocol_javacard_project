@@ -130,6 +130,13 @@ public class JCardSimGateway implements CardGateway {
     }
 
     @Override
+    public synchronized CardAccessResult resetCard() {
+        sessions.clear();
+        pendingSession = null;
+        return CardAccessResult.success("Simulator card sessions cleared. Initialize a blank card again.");
+    }
+
+    @Override
     public synchronized void activate(String memberId, LocalDate currentDate, LocalDate expiryDate) {
         String normalized = CardId.normalize(memberId);
         CardSession session = sessions.get(normalized);

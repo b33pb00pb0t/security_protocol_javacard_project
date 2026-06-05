@@ -197,6 +197,20 @@ public class ConnectedTerminalService implements TerminalService {
     }
 
     @Override
+    public String resetCard() {
+        try {
+            CardGateway.CardAccessResult result = cardGateway.resetCard();
+            if (result.isSuccess()) {
+                pendingPackageType = "STANDARD";
+            }
+            return finish("MASTER", "", "RESET_CARD", result.isSuccess(),
+                    (result.isSuccess() ? "RESET COMPLETE: " : "RESET FAILED: ") + result.getMessage());
+        } catch (Exception e) {
+            return finish("MASTER", "", "RESET_CARD", false, "RESET FAILED: " + e.getMessage());
+        }
+    }
+
+    @Override
     public String personalizeCard(String packageType) {
         try {
             cardGateway.provision();

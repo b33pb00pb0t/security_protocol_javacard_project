@@ -1,17 +1,18 @@
 Timestamp,Terminal,MemberId,Action,Result,Message
-2026-06-05T17:19:58.728,AUTH,,LOGIN_MASTER,SUCCESS,Master login successful
-2026-06-05T17:20:37.054,AUTH,,LOGIN_MASTER,SUCCESS,Master login successful
-2026-06-05T17:20:38.88,MASTER,,INITIALIZE,SUCCESS,Master Terminal initialized hardware blank card. Assign the member ID in the Admin terminal.
-2026-06-05T17:20:54.569,AUTH,,LOGIN_ADMIN,SUCCESS,Admin login successful
-2026-06-05T17:20:58.364,ADMIN,0000007B,ACTIVATE,SUCCESS,Card 0000007B activated until 20261231. Phone linked: N/A
-2026-06-05T17:21:42.932,ADMIN,0000007B,DEACTIVATE,SUCCESS,Card 0000007B deactivated in backend policy.
-2026-06-05T17:21:57.857,ADMIN,0000007B,ACTIVATE,SUCCESS,Card 0000007B activated until 20261231. Phone linked: N/A
-2026-06-05T17:21:59.505,ADMIN,0000007B,DEACTIVATE,SUCCESS,Card 0000007B deactivated in backend policy.
-2026-06-05T17:22:03.551,AUTH,,LOGIN_ACCESS,SUCCESS,Access login successful
-2026-06-05T17:22:07.298,ACCESS,,SYNC_TERMINALS,SUCCESS,Terminal cache synced at 2026-06-05T17:22:07.296 | Active cards: 0 | Blocked cards: 0 | Block version: 0
-2026-06-05T17:22:08.685,ACCESS,0000007B,CHECK_IN_T1,DENIED,ACCESS DENIED: Card is not present in the access terminal Active List snapshot.
-2026-06-05T17:22:18.841,AUTH,,LOGIN_ADMIN,SUCCESS,Admin login successful
-2026-06-05T17:23:11.013,AUTH,,LOGIN_ADMIN,SUCCESS,Admin login successful
-2026-06-05T17:27:07.149,AUTH,,LOGIN,DENIED,Invalid password
-2026-06-05T17:27:08.731,AUTH,,LOGIN_MASTER,SUCCESS,Master login successful
-2026-06-05T17:30:41.966,AUTH,,LOGIN_MASTER,SUCCESS,Master login successful
+2026-06-05T17:32:03.001,AUTH,,LOGIN_MASTER,SUCCESS,Master login successful
+2026-06-05T17:34:47.744,MASTER,,INITIALIZE,SUCCESS,Master Terminal initialized hardware blank card. Assign the member ID in the Admin terminal.
+2026-06-05T17:34:58.528,AUTH,,LOGIN_ADMIN,SUCCESS,Admin login successful
+2026-06-05T17:35:03.149,ADMIN,0000007B,ACTIVATE,SUCCESS,Card 0000007B activated until 20261231. Phone linked: N/A
+2026-06-05T17:35:19.416,ADMIN,0000007B,READ_STATUS,SUCCESS,Card 0000007B | BackendStatus=ACTIVE | Expiry=20261231 | Package=STANDARD | Blocked=false | Gateway=HARDWARE | CardSession=true | AppletActive=true | AccessCache=NOT_SYNCED
+2026-06-05T17:35:34.621,ADMIN,000004D2,ACTIVATE,DENIED,ERROR: Inserted card is bound to 0000007B; not requested member 000004D2
+2026-06-05T17:36:39.528,ADMIN,0000007B,DEACTIVATE,SUCCESS,Card 0000007B deactivated in backend policy.
+2026-06-05T17:36:45.648,ADMIN,0000007B,ACTIVATE,SUCCESS,Card 0000007B activated until 20261231. Phone linked: N/A
+2026-06-05T17:38:30.811,AUTH,,LOGIN_ACCESS,SUCCESS,Access login successful
+2026-06-05T17:38:36.65,ACCESS,,CHECK_IN_T1,DENIED,ACCESS DENIED: Member ID cannot be empty
+2026-06-05T17:38:42.331,ACCESS,0000007B,CHECK_IN_T1,DENIED,ACCESS DENIED: Access terminal cache is not synced. Press Sync Terminals first.
+2026-06-05T17:53:51.548,AUTH,,LOGIN_ACCESS,SUCCESS,Access login successful
+2026-06-05T17:53:56.899,AUTH,,LOGIN_MASTER,SUCCESS,Master login successful
+2026-06-05T17:54:02.574,AUTH,,LOGIN_ADMIN,SUCCESS,Admin login successful
+2026-06-05T17:54:09.892,ACCESS,,SYNC_TERMINALS,SUCCESS,Terminal cache synced at 2026-06-05T17:54:09.892 | Active cards: 1 | Blocked cards: 0 | Block version: 0
+2026-06-05T17:54:16.608,AUTH,,LOGIN_ACCESS,SUCCESS,Access login successful
+2026-06-05T18:01:06.469,ACCESS,0000007B,CHECK_IN_T1,SUCCESS,ACCESS GRANTED: Tier 1 access granted by physical card [0000007B]

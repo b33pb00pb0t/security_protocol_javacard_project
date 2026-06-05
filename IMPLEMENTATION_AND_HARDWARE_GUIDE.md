@@ -106,9 +106,9 @@ third-party SDK contents and generated output are grouped separately.
 | `src/frontend/TerminalService.java` | Frontend-facing interface for membership and access operations. |
 | `src/frontend/ConnectedTerminalService.java` | Connects GUI actions to backend policy, offline snapshots, auditing, and the selected card gateway. |
 | `src/frontend/LoginPanel.java` | Role login screen. |
-| `src/frontend/MasterPanel.java` | GUI for blank card initialization, personalization, certificate installation, and issuer data; it does not assign member IDs. |
-| `src/frontend/AdminPanel.java` | GUI for assigning member IDs during activation, deactivation, renewal, blocking, and status checks. |
-| `src/frontend/AccessPanel.java` | GUI for terminal synchronization and Tier 1/Tier 2 check-ins. |
+| `src/frontend/MasterPanel.java` | GUI for blank card initialization, destructive card reset, and initialized-card status; it does not assign member IDs. |
+| `src/frontend/AdminPanel.java` | GUI for assigning member IDs during activation, deactivation, renewal, blocking, terminal synchronization, and status checks. |
+| `src/frontend/AccessPanel.java` | GUI for Tier 1/Tier 2 check-ins against the latest synced terminal snapshot. |
 
 ### Standalone Terminal Demos
 
@@ -190,11 +190,15 @@ Normal GUI lifecycle:
 
 1. Log in as Master and initialize a blank card. Do not enter a member ID in
    the Master terminal.
-2. Optionally personalize the blank card's pending package type.
-3. Log in as Admin and activate the card with the member ID, expiry date, and
+2. Log in as Admin and activate the card with the member ID, expiry date, and
    phone number.
-4. Log in as Access, sync terminals, then run Tier 1 or Tier 2 check-in with
+3. In Admin, press Sync Terminals so the access terminal snapshot is current.
+4. Log in as Access, then run Tier 1 or Tier 2 check-in with
    the assigned member ID.
+
+Master Reset Card is destructive for this project applet. In simulator mode it
+clears in-memory card sessions. In hardware mode it uses GlobalPlatformPro to
+delete this project applet/package and reinstall `build/cap/applet.cap`.
 
 The interactive raw-APDU lifecycle demo is also available:
 
@@ -315,7 +319,7 @@ Roles enforced by the current implementation:
 
 | Role | Value | Used for |
 | --- | --- | --- |
-| `ROLE_CARD` | `01` | Card certificates loaded during personalization and returned by the applet. |
+| `ROLE_CARD` | `01` | Card certificates loaded during Master initialization and returned by the applet. |
 | `ROLE_ADMIN_TERMINAL` | `03` | Authenticated activation and block APDUs. |
 | `ROLE_CONTROLLED_ACCESS_TERMINAL` | `05` | Tier 2 terminal certificates. |
 

@@ -19,6 +19,8 @@ public interface TerminalService {
 
     String initializeCard();
 
+    String resetCard();
+
     String personalizeCard(String packageType);
 
     String installCertificate();
