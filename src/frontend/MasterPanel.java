@@ -7,7 +7,6 @@ public class MasterPanel extends JPanel {
     private final AppFrame appFrame;
     private final TerminalService terminalService;
 
-    private final JTextField packageTypeField;
     private final JTextArea outputArea;
 
     public MasterPanel(AppFrame appFrame, TerminalService terminalService) {
@@ -20,27 +19,18 @@ public class MasterPanel extends JPanel {
         title.setFont(new Font("Arial", Font.BOLD, 22));
         add(title, BorderLayout.NORTH);
 
-        JPanel formPanel = new JPanel(new GridLayout(1, 2, 8, 8));
-        packageTypeField = new JTextField("STANDARD");
-
-        formPanel.add(new JLabel("Package Type:"));
-        formPanel.add(packageTypeField);
-
-        JPanel buttonPanel = new JPanel(new GridLayout(2, 2, 8, 8));
+        JPanel buttonPanel = new JPanel(new GridLayout(1, 3, 8, 8));
 
         JButton initializeButton = new JButton("Initialize Card");
-        JButton personalizeButton = new JButton("Personalize Card");
         JButton statusButton = new JButton("Read Card Status");
         JButton logoutButton = new JButton("Logout");
 
         buttonPanel.add(initializeButton);
-        buttonPanel.add(personalizeButton);
         buttonPanel.add(statusButton);
         buttonPanel.add(logoutButton);
 
         JPanel centerPanel = new JPanel(new BorderLayout(8, 8));
         centerPanel.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
-        centerPanel.add(formPanel, BorderLayout.NORTH);
         centerPanel.add(buttonPanel, BorderLayout.CENTER);
 
         outputArea = new JTextArea(6, 50);
@@ -54,9 +44,6 @@ public class MasterPanel extends JPanel {
 
         initializeButton.addActionListener(e ->
                 log(terminalService.initializeCard()));
-
-        personalizeButton.addActionListener(e ->
-                log(terminalService.personalizeCard(packageTypeField.getText())));
 
         statusButton.addActionListener(e ->
                 log(terminalService.readInitializedCardStatus()));

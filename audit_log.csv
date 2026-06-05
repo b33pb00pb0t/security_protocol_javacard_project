@@ -12,3 +12,6 @@ Timestamp,Terminal,MemberId,Action,Result,Message
 2026-06-05T17:22:08.685,ACCESS,0000007B,CHECK_IN_T1,DENIED,ACCESS DENIED: Card is not present in the access terminal Active List snapshot.
 2026-06-05T17:22:18.841,AUTH,,LOGIN_ADMIN,SUCCESS,Admin login successful
 2026-06-05T17:23:11.013,AUTH,,LOGIN_ADMIN,SUCCESS,Admin login successful
+2026-06-05T17:27:07.149,AUTH,,LOGIN,DENIED,Invalid password
+2026-06-05T17:27:08.731,AUTH,,LOGIN_MASTER,SUCCESS,Master login successful
+2026-06-05T17:30:41.966,AUTH,,LOGIN_MASTER,SUCCESS,Master login successful
