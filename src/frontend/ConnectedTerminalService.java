@@ -25,6 +25,7 @@ public class ConnectedTerminalService implements TerminalService {
     private final CardGateway cardGateway;
     private final AuditLogger auditLogger;
     private final TerminalOfflineCache terminalCache;
+    private String pendingPackageType = "STANDARD";
 
     public ConnectedTerminalService(CsvMemberRepository memberRepository,
                                     BlockListRepository blockListRepository,
@@ -70,18 +71,20 @@ public class ConnectedTerminalService implements TerminalService {
                 return finish("ADMIN", normalized, "ACTIVATE", false,
                         "ERROR: Card " + normalized + " is BLOCKED. Cannot activate.");
             }
-            if (!cardGateway.hasSession(normalized)) {
+            if (!cardGateway.hasSession(normalized) && !cardGateway.hasInitializedCard()) {
                 return finish("ADMIN", normalized, "ACTIVATE", false,
-                        "ERROR: Initialize/select card " + normalized + " from the Master terminal first.");
+                        "ERROR: Initialize a blank card from the Master terminal first.");
             }
 
             LocalDate expiry = parseExpiryDate(expiryDate);
-            if (!cardGateway.isAppletActive(normalized)
+            if (!cardGateway.hasSession(normalized)
+                    || !cardGateway.isAppletActive(normalized)
                     || "HARDWARE".equals(cardGateway.getGatewayName())) {
                 cardGateway.activate(normalized, LocalDate.now(), expiry);
             }
             // Phone and package details are backend policy data; the applet activation
             // contract contains only member ID, current date, and expiry date.
+            memberRepository.ensureInitialized(normalized, pendingPackageType);
             MemberRecord record = memberRepository.activate(normalized, expiryDate, phoneNumber);
             return finish("ADMIN", normalized, "ACTIVATE", true,
                     "Card " + record.getMemberId() + " activated until " + record.getExpiryDate()
@@ -181,74 +184,69 @@ public class ConnectedTerminalService implements TerminalService {
     }
 
     @Override
-    public String initializeCard(String memberId) {
+    public String initializeCard() {
         try {
-            String normalized = CardId.normalize(memberId);
-            if (blockListRepository.isBlocked(normalized)) {
-                return finish("MASTER", normalized, "INITIALIZE", false,
-                        "ERROR: Card " + normalized + " is BLOCKED. Cannot initialize.");
-            }
-            cardGateway.provision(normalized);
-            MemberRecord record = memberRepository.ensureInitialized(normalized, "STANDARD");
-            return finish("MASTER", normalized, "INITIALIZE", true,
+            pendingPackageType = "STANDARD";
+            cardGateway.provision();
+            return finish("MASTER", "", "INITIALIZE", true,
                     "Master Terminal initialized " + cardGateway.getGatewayName().toLowerCase()
-                            + " card " + record.getMemberId()
-                            + " with package " + record.getPackageType() + ".");
+                            + " blank card. Assign the member ID in the Admin terminal.");
         } catch (Exception e) {
-            return finish("MASTER", memberId, "INITIALIZE", false, "ERROR: " + e.getMessage());
+            return finish("MASTER", "", "INITIALIZE", false, "ERROR: " + e.getMessage());
         }
     }
 
     @Override
-    public String personalizeCard(String memberId, String packageType) {
+    public String personalizeCard(String packageType) {
         try {
-            String normalized = CardId.normalize(memberId);
-            if (blockListRepository.isBlocked(normalized)) {
-                return finish("MASTER", normalized, "PERSONALIZE", false,
-                        "ERROR: Card " + normalized + " is BLOCKED. Cannot personalize.");
-            }
-            cardGateway.provision(normalized);
-            MemberRecord record = memberRepository.ensureInitialized(normalized, packageType);
-            return finish("MASTER", normalized, "PERSONALIZE", true,
-                    "Card " + record.getMemberId() + " personalized with package " + record.getPackageType() + ".");
+            cardGateway.provision();
+            pendingPackageType = normalizePackage(packageType);
+            return finish("MASTER", "", "PERSONALIZE", true,
+                    "Blank card personalized with pending package " + pendingPackageType
+                            + ". Member ID will be assigned in the Admin terminal.");
         } catch (Exception e) {
-            return finish("MASTER", memberId, "PERSONALIZE", false, "ERROR: " + e.getMessage());
+            return finish("MASTER", "", "PERSONALIZE", false, "ERROR: " + e.getMessage());
         }
     }
 
     @Override
-    public String installCertificate(String memberId) {
+    public String installCertificate() {
         try {
-            String normalized = CardId.normalize(memberId);
-            if (blockListRepository.isBlocked(normalized)) {
-                return finish("MASTER", normalized, "INSTALL_CERTIFICATE", false,
-                        "ERROR: Card " + normalized + " is BLOCKED. Cannot install certificate.");
-            }
-            cardGateway.provision(normalized);
-            if (memberRepository.find(normalized) == null) {
-                memberRepository.ensureInitialized(normalized, "STANDARD");
-            }
-            return finish("MASTER", normalized, "INSTALL_CERTIFICATE", true,
+            cardGateway.provision();
+            return finish("MASTER", "", "INSTALL_CERTIFICATE", true,
                     "Certificate installed for " + cardGateway.getGatewayName().toLowerCase()
-                            + " card " + normalized + ".");
+                            + " blank card identity.");
         } catch (Exception e) {
-            return finish("MASTER", memberId, "INSTALL_CERTIFICATE", false, "ERROR: " + e.getMessage());
+            return finish("MASTER", "", "INSTALL_CERTIFICATE", false, "ERROR: " + e.getMessage());
         }
     }
 
     @Override
-    public String loadIssuerData(String memberId) {
+    public String loadIssuerData() {
         try {
-            String normalized = CardId.normalize(memberId);
-            if (!cardGateway.hasSession(normalized)) {
-                return finish("MASTER", normalized, "LOAD_ISSUER_DATA", false,
-                        "ERROR: Initialize/select card " + normalized + " first.");
+            if (!cardGateway.hasInitializedCard()) {
+                return finish("MASTER", "", "LOAD_ISSUER_DATA", false,
+                        "ERROR: Initialize/select a blank card first.");
             }
-            return finish("MASTER", normalized, "LOAD_ISSUER_DATA", true,
+            return finish("MASTER", "", "LOAD_ISSUER_DATA", true,
                     "Issuer public data loaded on " + cardGateway.getGatewayName().toLowerCase()
-                            + " card " + normalized + ".");
+                            + " blank card.");
         } catch (Exception e) {
-            return finish("MASTER", memberId, "LOAD_ISSUER_DATA", false, "ERROR: " + e.getMessage());
+            return finish("MASTER", "", "LOAD_ISSUER_DATA", false, "ERROR: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public String readInitializedCardStatus() {
+        try {
+            StringBuilder builder = new StringBuilder();
+            builder.append("BlankCardInitialized=").append(cardGateway.hasInitializedCard());
+            builder.append(" | Gateway=").append(cardGateway.getGatewayName());
+            builder.append(" | PendingPackage=").append(pendingPackageType);
+            builder.append(" | AccessCache=").append(terminalCache.getSnapshot().isSynced() ? "SYNCED" : "NOT_SYNCED");
+            return finish("MASTER", "", "READ_INITIALIZED_CARD_STATUS", true, builder.toString());
+        } catch (Exception e) {
+            return finish("MASTER", "", "READ_INITIALIZED_CARD_STATUS", false, "ERROR: " + e.getMessage());
         }
     }
 
@@ -330,6 +328,12 @@ public class ConnectedTerminalService implements TerminalService {
         } catch (DateTimeParseException e) {
             throw new IllegalArgumentException("Expiry date must use YYYYMMDD", e);
         }
+    }
+
+    private String normalizePackage(String packageType) {
+        return packageType == null || packageType.trim().isEmpty()
+                ? "STANDARD"
+                : packageType.trim().toUpperCase();
     }
 
     private String finish(String terminal, String memberId, String action, boolean success, String message) {

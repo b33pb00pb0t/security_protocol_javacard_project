@@ -19,10 +19,10 @@ public class OpenAccessTerminal extends BaseTerminal {
 
         try {
             byte[] certData = getCardCertificate();
-            byte[] memberId = verifyAndGetIdFromCert(certData);
+            byte[] cardIdentity = verifyAndGetIdFromCert(certData);
             
-            String idHex = bytesToHex(memberId);
-            System.out.println("[OAT] Card Authenticated. Member ID: " + idHex);
+            String idHex = bytesToHex(cardIdentity);
+            System.out.println("[OAT] Card Authenticated. Card Certificate ID: " + idHex);
 
             if (isIdBlocked(idHex)) {
                 System.err.println("[OAT] ACCESS DENIED: Card is in the Block List.");
@@ -45,7 +45,7 @@ public class OpenAccessTerminal extends BaseTerminal {
                 sig.update(nonce);
 
                 if (sig.verify(cardSignature)) {
-                    System.out.println("[OAT] SUCCESS: Access Granted to " + idHex);
+                    System.out.println("[OAT] SUCCESS: Card possession verified for certificate ID " + idHex);
                 } else {
                     System.err.println("[OAT] FAILED: Digital signature mismatch.");
                 }

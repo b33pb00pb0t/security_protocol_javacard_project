@@ -40,7 +40,8 @@ public abstract class BaseTerminal {
 
     /**
      * Verifies the Card Certificate using the Master Public Key.
-     * Returns the verified Card ID (4 bytes).
+     * Returns the verified card certificate identity (4 bytes), not the
+     * member ID assigned later by the Admin terminal.
      */
     protected byte[] verifyAndGetIdFromCert() throws Exception {
         return verifyAndGetIdFromCert(getCardCertificate());
@@ -58,12 +59,12 @@ public abstract class BaseTerminal {
 
         ByteBuffer buffer = ByteBuffer.wrap(fullResponse);
         byte role = buffer.get();
-        byte[] idC = new byte[4];
+        byte[] cardIdentity = new byte[4];
         byte[] modulusC = new byte[64];
         byte[] exponentC = new byte[3];
         byte[] signatureMT = new byte[64];
 
-        buffer.get(idC);
+        buffer.get(cardIdentity);
         buffer.get(modulusC);
         buffer.get(exponentC);
         buffer.get(signatureMT);
@@ -83,7 +84,7 @@ public abstract class BaseTerminal {
         }
 
         System.out.println("[Terminal] Card Certificate verified successfully via PK_M.");
-        return idC;
+        return cardIdentity;
     }
 
     protected byte[] getCardCertificate() throws CardException {

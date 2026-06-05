@@ -11,9 +11,11 @@ public interface CardGateway {
 
     boolean hasSession(String memberId);
 
+    boolean hasInitializedCard();
+
     boolean isAppletActive(String memberId);
 
-    void provision(String memberId);
+    void provision();
 
     void activate(String memberId, LocalDate currentDate, LocalDate expiryDate);
 

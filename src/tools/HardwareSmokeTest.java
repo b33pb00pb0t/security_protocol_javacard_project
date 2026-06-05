@@ -51,9 +51,9 @@ public final class HardwareSmokeTest {
                     && commandArguments.size() == 3) {
                 String memberId = commandArguments.get(1);
                 LocalDate expiry = LocalDate.parse(commandArguments.get(2), DATE_FORMAT);
-                System.out.println("Provisioning physical card for member " + memberId + "...");
-                gateway.provision(memberId);
-                System.out.println("Provisioning APDUs: SUCCESS");
+                System.out.println("Provisioning blank physical card before assigning member " + memberId + "...");
+                gateway.provision();
+                System.out.println("Blank provisioning APDUs: SUCCESS");
                 gateway.activate(memberId, LocalDate.now(), expiry);
                 System.out.println("Authenticated activation APDU: SUCCESS");
                 return;

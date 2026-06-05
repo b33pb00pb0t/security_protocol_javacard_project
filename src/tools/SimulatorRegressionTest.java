@@ -64,7 +64,7 @@ public final class SimulatorRegressionTest {
         String memberId = "1234";
         LocalDate today = LocalDate.now();
 
-        requireContains(service.initializeCard(memberId), "initialized", "provision");
+        requireContains(service.initializeCard(), "blank card", "provision");
         requireContains(service.activateCard(memberId, today.plusYears(2).format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)),
                 "activated", "activate");
         requireContains(service.syncTerminals(), "synced", "terminal sync");
@@ -129,8 +129,10 @@ public final class SimulatorRegressionTest {
                 "ACTIVATE with replayed old admin nonce");
 
         RawCard wrongIdCard = newProvisionedCard("1234");
-        requireSw(authenticatedActivate(wrongIdCard, "1235", LocalDate.now(), LocalDate.now().plusYears(1)),
-                0x6982, "ACTIVATE with wrong signed CardID");
+        requireSw(authenticatedActivate(wrongIdCard, "1234", LocalDate.now(), LocalDate.now().plusYears(1)),
+                0x9000, "ACTIVATE before wrong member block");
+        requireSw(authenticatedBlock(wrongIdCard, "1235"), 0x6982,
+                "BLOCK with wrong assigned member ID");
 
         RawCard malformedDateCard = newProvisionedCard("1234");
         byte[] malformedDateActivation = activationOperationData("1234", LocalDate.now(), LocalDate.now().plusYears(1));
@@ -149,7 +151,7 @@ public final class SimulatorRegressionTest {
         requireSw(authenticatedActivate(card, "1234", today, today.plusYears(1)),
                 0x9000, "raw receipt ACTIVATE");
 
-        Tier2Exchange exchange = runRawTier2Exchange(card, today);
+        Tier2Exchange exchange = runRawTier2Exchange(card, "1234", today);
         require(exchange.receipt.getDailyCounter() == 1,
                 "Tier 2 receipt daily counter was " + exchange.receipt.getDailyCounter());
         require(exchange.receipt.getTransactionCounter() == 1,
@@ -277,7 +279,7 @@ public final class SimulatorRegressionTest {
         return data;
     }
 
-    private static Tier2Exchange runRawTier2Exchange(RawCard card, LocalDate currentDate) {
+    private static Tier2Exchange runRawTier2Exchange(RawCard card, String memberId, LocalDate currentDate) {
         try {
             KeyPairGenerator keyGenerator = KeyPairGenerator.getInstance("RSA");
             keyGenerator.initialize(512);
@@ -325,7 +327,7 @@ public final class SimulatorRegressionTest {
             require(step2.data.length == ProtocolConstants.TIER2_RECEIPT_LENGTH,
                     "Raw Tier 2 receipt returned " + step2.data.length + " bytes");
 
-            byte[] cardId = certificateId(cardCertificate);
+            byte[] cardId = CardId.toBytes(memberId);
             byte[] terminalId = certificateId(terminalCertificate);
             Tier2ReceiptVerifier.Result receipt = Tier2ReceiptVerifier.verify(step2.data, cardPublicKey,
                     cardId, terminalId, date, terminalNonce, cardNonce);

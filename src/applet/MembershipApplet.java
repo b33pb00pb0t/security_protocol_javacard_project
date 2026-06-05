@@ -27,6 +27,7 @@ public final class MembershipApplet extends Applet {
     private static final byte INS_T2_STEP2 = (byte) 0x22;
     private static final byte INS_ADMIN_CHALLENGE = (byte) 0x30;
     private static final byte INS_GET_CERT = (byte) 0x60;
+    private static final byte INS_GET_MEMBER_ID = (byte) 0x61;
 
     private static final short SW_APDU_RECEIVE_PROBLEM = (short) 0x6F10;
     private static final short SW_TERMINAL_CERTIFICATE_PROBLEM = (short) 0x6F11;
@@ -107,6 +108,7 @@ public final class MembershipApplet extends Applet {
             case INS_T2_STEP2: processCheckInTier2Step2(apdu); break;
             case INS_ADMIN_CHALLENGE: processAdminChallenge(apdu, buffer); break;
             case INS_GET_CERT: processGetCert(apdu, buffer); break;
+            case INS_GET_MEMBER_ID: processGetMemberId(apdu, buffer); break;
             default: ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);
         }
     }
@@ -235,7 +237,6 @@ public final class MembershipApplet extends Applet {
         verifyAuthenticatedAdminCommand(buffer, ProtocolConstants.OP_ACTIVATE,
                 ProtocolConstants.ADMIN_ACTIVATE_DATA_LENGTH);
         short dataOffset = ISO7816.OFFSET_CDATA;
-        verifySignedCardId(buffer, (short) (dataOffset + 1));
 
         // If the card is removed mid-operation, the JCSystem rolls back to the previous state.
         JCSystem.beginTransaction();
@@ -263,7 +264,7 @@ public final class MembershipApplet extends Applet {
 
         verifyAuthenticatedAdminCommand(buffer, ProtocolConstants.OP_BLOCK,
                 ProtocolConstants.ADMIN_BLOCK_DATA_LENGTH);
-        verifySignedCardId(buffer, (short) (ISO7816.OFFSET_CDATA + 1));
+        verifySignedMemberId(buffer, (short) (ISO7816.OFFSET_CDATA + 1));
         
         JCSystem.beginTransaction();
         try {
@@ -336,8 +337,8 @@ public final class MembershipApplet extends Applet {
         }
     }
 
-    private void verifySignedCardId(byte[] buffer, short cardIdOffset) {
-        if (Util.arrayCompare(buffer, cardIdOffset, certC, ProtocolConstants.CERT_ID_OFFSET,
+    private void verifySignedMemberId(byte[] buffer, short memberIdOffset) {
+        if (Util.arrayCompare(buffer, memberIdOffset, memberId, (short) 0,
                 (short) 4) != (short) 0) {
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
@@ -519,5 +520,13 @@ public final class MembershipApplet extends Applet {
         
         Util.arrayCopy(certC, (short) 0, buffer, (short) 0, (short) certC.length);
         apdu.setOutgoingAndSend((short) 0, (short) certC.length);
+    }
+
+    private void processGetMemberId(APDU apdu, byte[] buffer) {
+        if (currentState == STATE_INITIALIZE)
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+
+        Util.arrayCopy(memberId, (short) 0, buffer, (short) 0, (short) memberId.length);
+        apdu.setOutgoingAndSend((short) 0, (short) memberId.length);
     }
 }

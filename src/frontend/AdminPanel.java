@@ -27,7 +27,7 @@ public class AdminPanel extends JPanel {
         expiryDateField = new JTextField("20261231");
         phoneField = new JTextField();
 
-        formPanel.add(new JLabel("Member ID:"));
+        formPanel.add(new JLabel("Card ID:"));
         formPanel.add(memberIdField);
         formPanel.add(new JLabel("Expiry Date (YYYYMMDD):"));
         formPanel.add(expiryDateField);

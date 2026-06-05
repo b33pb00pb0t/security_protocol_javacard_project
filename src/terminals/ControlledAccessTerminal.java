@@ -2,6 +2,7 @@ package terminals;
 
 import applet.ProtocolConstants;
 import backend.ApduDateCodec;
+import backend.CardId;
 import backend.Tier2ReceiptVerifier;
 
 import javax.smartcardio.CommandAPDU;
@@ -52,7 +53,7 @@ public class ControlledAccessTerminal extends BaseTerminal {
         Files.write(Paths.get(filePath), terminalCertificate);
     }
 
-    private void processCheckinTier2() throws Exception {
+    private void processCheckinTier2(String memberIdInput) throws Exception {
         if (masterSignature == null) {
             throw new IllegalStateException("A 64-byte master signature for this terminal certificate is required");
         }
@@ -70,7 +71,8 @@ public class ControlledAccessTerminal extends BaseTerminal {
         byte[] cardSignature = Arrays.copyOfRange(step1.getData(), 16, 80);
         byte[] cardCertificate = Arrays.copyOfRange(step1.getData(), 80,
                 ProtocolConstants.TIER2_STEP1_RESPONSE_LENGTH);
-        byte[] memberId = verifyAndGetIdFromCert(cardCertificate);
+        byte[] cardIdentity = verifyAndGetIdFromCert(cardCertificate);
+        byte[] memberId = CardId.toBytes(memberIdInput);
         PublicKey cardPublicKey = getCardPublicKeyFromCert(cardCertificate);
 
         Signature cardVerifier = Signature.getInstance("SHA1withRSA", "BC");
@@ -102,6 +104,7 @@ public class ControlledAccessTerminal extends BaseTerminal {
         Tier2ReceiptVerifier.Result receipt = Tier2ReceiptVerifier.verify(step2.getData(), cardPublicKey,
                 memberId, certificateId(terminalCertificate), currentDate, terminalNonce, cardNonce);
         System.out.println("[CAT] ACCESS GRANTED for " + bytesToHex(memberId)
+                + ". Card Certificate ID: " + bytesToHex(cardIdentity)
                 + ". Daily Counter: " + receipt.getDailyCounter()
                 + ". Transaction Counter: " + receipt.getTransactionCounter()
                 + ". Receipt: " + bytesToHex(step2.getData()));
@@ -166,13 +169,13 @@ public class ControlledAccessTerminal extends BaseTerminal {
         }
     }
 
-    public void startProcess() {
+    public void startProcess(String memberId) {
         if (!connect()) {
             System.err.println("[CAT] Reader not found, no card present, or applet SELECT failed.");
             return;
         }
         try {
-            processCheckinTier2();
+            processCheckinTier2(memberId);
         } catch (Exception e) {
             System.err.println("[CAT] Error: " + e.getMessage());
         } finally {
@@ -182,15 +185,15 @@ public class ControlledAccessTerminal extends BaseTerminal {
 
     public static void main(String[] args) throws Exception {
         ControlledAccessTerminal terminal = new ControlledAccessTerminal();
-        if (args.length == 0) {
+        if (args.length < 2) {
             terminal.saveCertificateDataForSigning("terminal_certificate_to_sign.bin");
             System.err.println("A master signature is required. Certificate data written to "
                     + "terminal_certificate_to_sign.bin.");
-            System.err.println("Run again: ControlledAccessTerminal <terminal-master-signature.bin>");
+            System.err.println("Run again: ControlledAccessTerminal <terminal-master-signature.bin> <memberId>");
             return;
         }
         terminal.loadMasterSignature(args[0]);
         terminal.loadMasterPublicKey("master_public.key");
-        terminal.startProcess();
+        terminal.startProcess(args[1]);
     }
 }

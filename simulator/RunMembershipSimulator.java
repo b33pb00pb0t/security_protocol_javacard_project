@@ -102,7 +102,7 @@ public final class RunMembershipSimulator {
             sendCommand(sim, (byte)0x12, masterPayload, "Master Public Key Loading");
 
             byte[] certData = new byte[ProtocolConstants.CARD_CERTIFICATE_LENGTH];
-            byte[] cardId = CardId.toBytes("1234");
+            byte[] cardId = {0x01, 0x02, 0x03, 0x04};
             certData[ProtocolConstants.CERT_ROLE_OFFSET] = ProtocolConstants.ROLE_CARD;
             System.arraycopy(cardId, 0, certData, ProtocolConstants.CERT_ID_OFFSET, 4);
             System.arraycopy(toFixedByteArray(cardPub.getModulus(), 64), 0, certData,

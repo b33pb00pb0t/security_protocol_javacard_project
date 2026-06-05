@@ -7,7 +7,6 @@ public class MasterPanel extends JPanel {
     private final AppFrame appFrame;
     private final TerminalService terminalService;
 
-    private final JTextField memberIdField;
     private final JTextField packageTypeField;
     private final JTextArea outputArea;
 
@@ -21,28 +20,21 @@ public class MasterPanel extends JPanel {
         title.setFont(new Font("Arial", Font.BOLD, 22));
         add(title, BorderLayout.NORTH);
 
-        JPanel formPanel = new JPanel(new GridLayout(2, 2, 8, 8));
-        memberIdField = new JTextField();
+        JPanel formPanel = new JPanel(new GridLayout(1, 2, 8, 8));
         packageTypeField = new JTextField("STANDARD");
 
-        formPanel.add(new JLabel("Member ID:"));
-        formPanel.add(memberIdField);
         formPanel.add(new JLabel("Package Type:"));
         formPanel.add(packageTypeField);
 
-        JPanel buttonPanel = new JPanel(new GridLayout(3, 2, 8, 8));
+        JPanel buttonPanel = new JPanel(new GridLayout(2, 2, 8, 8));
 
         JButton initializeButton = new JButton("Initialize Card");
         JButton personalizeButton = new JButton("Personalize Card");
-        JButton certificateButton = new JButton("Install Certificate");
-        JButton issuerButton = new JButton("Load Issuer Data");
         JButton statusButton = new JButton("Read Card Status");
         JButton logoutButton = new JButton("Logout");
 
         buttonPanel.add(initializeButton);
         buttonPanel.add(personalizeButton);
-        buttonPanel.add(certificateButton);
-        buttonPanel.add(issuerButton);
         buttonPanel.add(statusButton);
         buttonPanel.add(logoutButton);
 
@@ -61,25 +53,15 @@ public class MasterPanel extends JPanel {
         add(scrollPane, BorderLayout.SOUTH);
 
         initializeButton.addActionListener(e ->
-                log(terminalService.initializeCard(getMemberId())));
+                log(terminalService.initializeCard()));
 
         personalizeButton.addActionListener(e ->
-                log(terminalService.personalizeCard(getMemberId(), packageTypeField.getText())));
-
-        certificateButton.addActionListener(e ->
-                log(terminalService.installCertificate(getMemberId())));
-
-        issuerButton.addActionListener(e ->
-                log(terminalService.loadIssuerData(getMemberId())));
+                log(terminalService.personalizeCard(packageTypeField.getText())));
 
         statusButton.addActionListener(e ->
-                log(terminalService.readCardStatus(getMemberId())));
+                log(terminalService.readInitializedCardStatus()));
 
         logoutButton.addActionListener(e -> appFrame.showLogin());
-    }
-
-    private String getMemberId() {
-        return memberIdField.getText().trim();
     }
 
     private void log(String text) {

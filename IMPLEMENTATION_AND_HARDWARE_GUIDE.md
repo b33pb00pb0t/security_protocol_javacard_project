@@ -35,7 +35,9 @@ logging, and offline terminal snapshot checks. `CardGateway` isolates card
 transport details so the same frontend and service logic works with JCardSim
 and real PC/SC hardware.
 
-`JCardSimGateway` creates one in-memory applet session per member ID.
+`JCardSimGateway` creates a blank in-memory applet session during Master
+initialization and binds that session to a member ID only after Admin
+activation.
 `HardwareCardGateway` connects to a PC/SC reader with `javax.smartcardio`,
 selects the installed applet, and sends the same APDUs to a physical card.
 
@@ -85,7 +87,7 @@ third-party SDK contents and generated output are grouped separately.
 | `src/backend/CsvBlockListRepository.java` | Persists blocked cards in `blocked_cards.csv`. |
 | `src/backend/CsvMemberRepository.java` | Persists membership records and lifecycle changes in `members.csv`. |
 | `src/backend/HardwareCardGateway.java` | PC/SC implementation that selects and exchanges APDUs with a physical JavaCard. |
-| `src/backend/JCardSimGateway.java` | In-memory implementation that creates one JCardSim applet session per member ID. |
+| `src/backend/JCardSimGateway.java` | In-memory implementation that creates a blank JCardSim card and binds it to a member ID during Admin activation. |
 | `src/backend/MemberRecord.java` | Immutable membership policy record containing status, expiry, package, phone, and timestamps. |
 | `src/backend/MemberRepository.java` | Abstraction for storing and retrieving membership records. |
 | `src/backend/NoOpAuditLogger.java` | Audit logger used where persistence is intentionally not required. |
@@ -104,8 +106,8 @@ third-party SDK contents and generated output are grouped separately.
 | `src/frontend/TerminalService.java` | Frontend-facing interface for membership and access operations. |
 | `src/frontend/ConnectedTerminalService.java` | Connects GUI actions to backend policy, offline snapshots, auditing, and the selected card gateway. |
 | `src/frontend/LoginPanel.java` | Role login screen. |
-| `src/frontend/MasterPanel.java` | GUI for card initialization, personalization, certificate installation, and issuer data. |
-| `src/frontend/AdminPanel.java` | GUI for activation, deactivation, renewal, blocking, and status checks. |
+| `src/frontend/MasterPanel.java` | GUI for blank card initialization, personalization, certificate installation, and issuer data; it does not assign member IDs. |
+| `src/frontend/AdminPanel.java` | GUI for assigning member IDs during activation, deactivation, renewal, blocking, and status checks. |
 | `src/frontend/AccessPanel.java` | GUI for terminal synchronization and Tier 1/Tier 2 check-ins. |
 
 ### Standalone Terminal Demos
@@ -183,6 +185,16 @@ GUI demo passwords:
 | Master | `master123` |
 | Admin | `admin123` |
 | Access | `access123` |
+
+Normal GUI lifecycle:
+
+1. Log in as Master and initialize a blank card. Do not enter a member ID in
+   the Master terminal.
+2. Optionally personalize the blank card's pending package type.
+3. Log in as Admin and activate the card with the member ID, expiry date, and
+   phone number.
+4. Log in as Access, sync terminals, then run Tier 1 or Tier 2 check-in with
+   the assigned member ID.
 
 The interactive raw-APDU lifecycle demo is also available:
 
@@ -289,7 +301,7 @@ Certificates now include a signed entity role byte. The signed certificate body
 is:
 
 ```text
-Role(1) || EntityID(4) || RSA_Modulus(64) || RSA_Exponent(3)
+Role(1) || CertificateEntityID(4) || RSA_Modulus(64) || RSA_Exponent(3)
 ```
 
 The body is 72 bytes and the issuer/master signature is 64 bytes, so a full
@@ -311,6 +323,10 @@ Roles enforced by the current implementation:
 shared protocol, but the current applet does not authenticate a terminal
 certificate for Tier 1 or provisioning.
 
+The `ROLE_CARD` certificate identity is a card identity generated during Master
+initialization. It is not the member ID. The member ID is assigned later by the
+Admin terminal during activation and is stored separately in applet state.
+
 ### Authenticated Admin Commands
 
 Admin state-changing APDUs now use challenge-response authentication:
@@ -329,13 +345,14 @@ and the fresh card nonce `NC`.
 Signed operation data:
 
 ```text
-ACTIVATE: OP_ACTIVATE || CardID || CurrentDate || ExpiryDate
-BLOCK:    OP_BLOCK    || CardID
+ACTIVATE: OP_ACTIVATE || MemberID || CurrentDate || ExpiryDate
+BLOCK:    OP_BLOCK    || MemberID
 ```
 
 The applet appends `NC` internally before verifying the admin signature. Only
-after all checks pass does it update persistent card state inside a JavaCard
-transaction.
+after all checks pass does it store the member ID and update persistent card
+state inside a JavaCard transaction. Later block/check-in logic compares
+against that assigned member ID, not against the card certificate identity.
 
 ### Signed Tier 2 Receipt
 
@@ -350,7 +367,7 @@ The card signs:
 
 ```text
 OP_T2_RESULT
-|| CardID
+|| MemberID
 || TerminalID
 || Date
 || TerminalNonce NT
@@ -361,9 +378,9 @@ OP_T2_RESULT
 ```
 
 `JCardSimGateway`, `HardwareCardGateway`, and `ControlledAccessTerminal` verify
-this signature before reporting access granted. Successful GUI Tier 2 messages
-include the verified receipt hex, so `audit_log.csv` can retain it for
-forensics.
+this signature against the assigned member ID before reporting access granted.
+Successful GUI Tier 2 messages include the verified receipt hex, so
+`audit_log.csv` can retain it for forensics.
 
 ## 10. APDU Contract Summary
 
@@ -375,13 +392,14 @@ BCD bytes in `YYYYMMDD` order.
 | `10` | Load card private key | modulus(64) \|\| privateExponent(64) | none | `INITIALIZE` | Yes |
 | `11` | Load card certificate | CertCBody(72) \|\| MasterSignature(64) | none | `INITIALIZE` | Yes |
 | `12` | Load master public key | modulus(64) \|\| exponent(3) | none | `INITIALIZE` | Yes |
-| `13` | Activate card | OP_ACTIVATE(1) \|\| cardId(4) \|\| currentDate(4) \|\| expiryDate(4) \|\| AdminCertBody(72) \|\| AdminMasterSignature(64) \|\| AdminSignature(64) | none | `INITIALIZE` or `INACTIVE` | Yes |
-| `14` | Block card | OP_BLOCK(1) \|\| cardId(4) \|\| AdminCertBody(72) \|\| AdminMasterSignature(64) \|\| AdminSignature(64) | none | `ACTIVE` | Yes |
+| `13` | Activate card and assign member | OP_ACTIVATE(1) \|\| memberId(4) \|\| currentDate(4) \|\| expiryDate(4) \|\| AdminCertBody(72) \|\| AdminMasterSignature(64) \|\| AdminSignature(64) | none | `INITIALIZE` or `INACTIVE` | Yes |
+| `14` | Block card | OP_BLOCK(1) \|\| memberId(4) \|\| AdminCertBody(72) \|\| AdminMasterSignature(64) \|\| AdminSignature(64) | none | `ACTIVE` | Yes |
 | `20` | Tier 1 check-in | terminalNonce(16) | cardSignature(64) | `ACTIVE` | No |
 | `21` | Tier 2 step 1 | terminalNonce(16) | cardNonce(16) \|\| cardSignature(64) \|\| Cert_C(136) | `ACTIVE` | No; stores transient nonces |
 | `22` | Tier 2 step 2 | terminalSignature(64) \|\| CertTBody(72) \|\| TerminalMasterSignature(64) \|\| date(4) | resultCode(1) \|\| dailyCounter(1) \|\| transactionCounter(2) \|\| cardSignature(64) | `ACTIVE`, valid step 1/authentication, below daily limit | Yes |
 | `30` | Admin challenge | none | adminNonce(16) | Any selected state | No; stores transient nonce |
 | `60` | Get card certificate | none | Cert_C(136) | Any state except `BLOCKED` | No |
+| `61` | Get assigned member ID | none | memberId(4) | Any state after activation | No |
 
 Common status words:
 

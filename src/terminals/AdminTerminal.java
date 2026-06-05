@@ -2,6 +2,7 @@ package terminals;
 
 import applet.ProtocolConstants;
 import backend.ApduDateCodec;
+import backend.CardId;
 
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
@@ -42,9 +43,12 @@ public class AdminTerminal extends BaseTerminal {
     }
 
     private void processActivate(Scanner scanner) throws Exception {
-        byte[] memberId = verifyAndGetIdFromCert();
+        byte[] cardIdentity = verifyAndGetIdFromCert();
+        System.out.println("[AT] Authentic blank card found. Card certificate ID: " + bytesToHex(cardIdentity));
+
+        System.out.print("Enter Member ID to assign: ");
+        byte[] memberId = CardId.toBytes(scanner.nextLine().trim());
         String idHex = bytesToHex(memberId);
-        System.out.println("[AT] Authentic Card Found: " + idHex);
 
         System.out.print("Enter Expiry Date (YYYYMMDD): ");
         LocalDate expiryDate = parseDate(scanner.nextLine());
@@ -67,8 +71,11 @@ public class AdminTerminal extends BaseTerminal {
         System.out.println("[AT] Card activated successfully.");
     }
 
-    private void processBlock() throws Exception {
-        byte[] memberId = verifyAndGetIdFromCert();
+    private void processBlock(Scanner scanner) throws Exception {
+        byte[] cardIdentity = verifyAndGetIdFromCert();
+        System.out.println("[AT] Authentic card found. Card certificate ID: " + bytesToHex(cardIdentity));
+        System.out.print("Enter assigned Member ID to block: ");
+        byte[] memberId = CardId.toBytes(scanner.nextLine().trim());
         String idHex = bytesToHex(memberId);
         byte[] operationData = new byte[ProtocolConstants.ADMIN_BLOCK_DATA_LENGTH];
         operationData[0] = ProtocolConstants.OP_BLOCK;
@@ -224,7 +231,7 @@ public class AdminTerminal extends BaseTerminal {
                         processActivate(scanner);
                         break;
                     case "2":
-                        processBlock();
+                        processBlock(scanner);
                         break;
                     case "3":
                         running = false;

@@ -17,13 +17,15 @@ public interface TerminalService {
 
     String viewBlockedCards();
 
-    String initializeCard(String memberId);
+    String initializeCard();
 
-    String personalizeCard(String memberId, String packageType);
+    String personalizeCard(String packageType);
 
-    String installCertificate(String memberId);
+    String installCertificate();
 
-    String loadIssuerData(String memberId);
+    String loadIssuerData();
+
+    String readInitializedCardStatus();
 
     String syncTerminals();
 

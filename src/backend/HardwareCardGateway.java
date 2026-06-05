@@ -47,6 +47,7 @@ public class HardwareCardGateway implements CardGateway {
     private static final byte INS_T2_STEP2 = (byte) 0x22;
     private static final byte INS_ADMIN_CHALLENGE = (byte) 0x30;
     private static final byte INS_GET_CERT = (byte) 0x60;
+    private static final byte INS_GET_MEMBER_ID = (byte) 0x61;
 
     private static final byte[] DEFAULT_APPLET_AID = new byte[] {
             (byte) 0xA0, (byte) 0x00, (byte) 0x00, (byte) 0x01,
@@ -219,8 +220,22 @@ public class HardwareCardGateway implements CardGateway {
 
     @Override
     public synchronized boolean hasSession(String memberId) {
-        ensureMemberCompatible(memberId);
-        return true;
+        try {
+            return CardId.normalize(memberId).equals(readAssignedMemberIdIfAvailable());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @Override
+    public synchronized boolean hasInitializedCard() {
+        try {
+            connect();
+            ApduResponse certificateResponse = transmit(INS_GET_CERT, null);
+            return certificateResponse.isSuccess() && verifyCardCertificateSignature(certificateResponse.data);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     @Override
@@ -232,16 +247,16 @@ public class HardwareCardGateway implements CardGateway {
     }
 
     @Override
-    public synchronized void provision(String memberId) {
-        String normalized = ensureMemberCompatible(memberId);
-        if (provisionedInThisSession && normalized.equals(boundMemberId)) {
+    public synchronized void provision() {
+        connect();
+        if (provisionedInThisSession) {
             return;
         }
         try {
             KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
             keyGen.initialize(512);
             KeyPair cardKeyPair = keyGen.generateKeyPair();
-            byte[] certC = buildCardCertificate(normalized, (RSAPublicKey) cardKeyPair.getPublic());
+            byte[] certC = buildCardCertificate(randomCardIdentity(), (RSAPublicKey) cardKeyPair.getPublic());
 
             requireSuccess(transmit(INS_INITIALIZE_KEY, buildPrivateKeyPayload(cardKeyPair)),
                     "Private key initialization");
@@ -249,28 +264,23 @@ public class HardwareCardGateway implements CardGateway {
                     buildPublicKeyPayload((RSAPublicKey) masterKeyPair.getPublic())), "Master public key loading");
             requireSuccess(transmit(INS_LOAD_CERT, certC), "Card certificate loading");
 
-            boundMemberId = normalized;
+            boundMemberId = null;
             appletActive = Boolean.FALSE;
             provisionedInThisSession = true;
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to provision physical card " + normalized
-                    + ": " + e.getMessage(), e);
+            throw new IllegalStateException("Failed to provision blank physical card: " + e.getMessage(), e);
         }
     }
 
     @Override
     public synchronized void activate(String memberId, LocalDate currentDate, LocalDate expiryDate) {
         String normalized = ensureMemberCompatible(memberId);
-        if (boundMemberId == null) {
-            ApduResponse certificateResponse = transmit(INS_GET_CERT, null);
-            requireSuccess(certificateResponse, "GET_CERT before activation");
-            try {
-                verifyAndExtractCardPublicKey(certificateResponse.data);
-                verifyCardMember(certificateResponse.data, normalized);
-            } catch (Exception e) {
-                throw new IllegalStateException("Could not verify card before activation: " + e.getMessage(), e);
-            }
-            boundMemberId = normalized;
+        ApduResponse certificateResponse = transmit(INS_GET_CERT, null);
+        requireSuccess(certificateResponse, "GET_CERT before activation");
+        try {
+            verifyAndExtractCardPublicKey(certificateResponse.data);
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not verify card certificate before activation: " + e.getMessage(), e);
         }
         byte[] payload = buildAuthenticatedAdminPayload(ProtocolConstants.OP_ACTIVATE,
                 activationOperationData(normalized, currentDate, expiryDate));
@@ -295,7 +305,7 @@ public class HardwareCardGateway implements CardGateway {
             ApduResponse certificateResponse = transmit(INS_GET_CERT, null);
             requireSuccess(certificateResponse, "GET_CERT before block");
             verifyAndExtractCardPublicKey(certificateResponse.data);
-            verifyCardMember(certificateResponse.data, normalized);
+            verifyAssignedMember(normalized);
             ApduResponse response = transmit(INS_BLOCK,
                     buildAuthenticatedAdminPayload(ProtocolConstants.OP_BLOCK,
                             blockOperationData(normalized)));
@@ -320,7 +330,7 @@ public class HardwareCardGateway implements CardGateway {
             ApduResponse certResponse = transmit(INS_GET_CERT, null);
             requireSuccess(certResponse, "GET_CERT");
             PublicKey cardPublicKey = verifyAndExtractCardPublicKey(certResponse.data);
-            verifyCardMember(certResponse.data, CardId.normalize(memberId));
+            verifyAssignedMember(CardId.normalize(memberId));
 
             ApduResponse signatureResponse = transmit(INS_CHECKIN_T1, terminalNonce);
             requireSuccess(signatureResponse, "Tier 1 APDU");
@@ -383,7 +393,7 @@ public class HardwareCardGateway implements CardGateway {
                 throw new SecurityException("Card certificate signature verification failed");
             }
             PublicKey cardPublicKey = extractCardPublicKey(certC);
-            verifyCardMember(certC, normalizedMemberId);
+            verifyAssignedMember(normalizedMemberId);
 
             Signature verifier = Signature.getInstance("SHA1withRSA");
             verifier.initVerify(cardPublicKey);
@@ -426,7 +436,7 @@ public class HardwareCardGateway implements CardGateway {
             }
 
             Tier2ReceiptVerifier.Result receipt = Tier2ReceiptVerifier.verify(step2.data, cardPublicKey,
-                    extractCertificateId(certC), extractCertificateId(terminalCertificate), date,
+                    CardId.toBytes(normalizedMemberId), extractCertificateId(terminalCertificate), date,
                     terminalNonce, cardNonce);
             debugTier2("Tier 2 receipt verification: true, resultCode=" + receipt.getResultCode()
                     + ", dailyCounter=" + receipt.getDailyCounter()
@@ -443,6 +453,10 @@ public class HardwareCardGateway implements CardGateway {
     private String ensureMemberCompatible(String memberId) {
         String normalized = CardId.normalize(memberId);
         connect();
+        String assignedMemberId = readAssignedMemberIdIfAvailable();
+        if (assignedMemberId != null) {
+            boundMemberId = assignedMemberId;
+        }
         if (boundMemberId != null && !boundMemberId.equals(normalized)) {
             throw new IllegalStateException("Inserted card is bound to " + boundMemberId
                     + ", not requested member " + normalized);
@@ -539,14 +553,22 @@ public class HardwareCardGateway implements CardGateway {
         return payload;
     }
 
-    private byte[] buildCardCertificate(String memberId, RSAPublicKey cardPublicKey) throws Exception {
+    private byte[] buildCardCertificate(byte[] cardIdentity, RSAPublicKey cardPublicKey) throws Exception {
         byte[] certificateData = buildEntityCertificateData(
-                ProtocolConstants.ROLE_CARD, CardId.toBytes(memberId), cardPublicKey);
+                ProtocolConstants.ROLE_CARD, cardIdentity, cardPublicKey);
         byte[] certC = new byte[ProtocolConstants.CARD_CERTIFICATE_LENGTH];
         System.arraycopy(certificateData, 0, certC, 0, ProtocolConstants.CERTIFICATE_BODY_LENGTH);
         System.arraycopy(signWithMaster(certificateData), 0, certC,
                 ProtocolConstants.CERT_SIGNATURE_OFFSET, ProtocolConstants.SIGNATURE_LENGTH);
         return certC;
+    }
+
+    private byte[] randomCardIdentity() {
+        byte[] identity = new byte[4];
+        do {
+            random.nextBytes(identity);
+        } while (identity[0] == 0 && identity[1] == 0 && identity[2] == 0 && identity[3] == 0);
+        return identity;
     }
 
     private byte[] buildEntityCertificateData(byte role, byte[] id, RSAPublicKey publicKey) {
@@ -600,13 +622,27 @@ public class HardwareCardGateway implements CardGateway {
                 ProtocolConstants.CERT_MODULUS_OFFSET);
     }
 
-    private void verifyCardMember(byte[] certC, String expectedMemberId) {
-        String certificateMemberId = toHex(Arrays.copyOfRange(certC,
-                ProtocolConstants.CERT_ID_OFFSET, ProtocolConstants.CERT_MODULUS_OFFSET));
-        if (!certificateMemberId.equals(CardId.normalize(expectedMemberId))) {
-            throw new SecurityException("Inserted card certificate belongs to " + certificateMemberId
+    private String readAssignedMemberIdIfAvailable() {
+        ApduResponse response = transmit(INS_GET_MEMBER_ID, null);
+        if (!response.isSuccess()) {
+            return null;
+        }
+        if (response.data.length != 4) {
+            throw new IllegalStateException("Assigned member response length was " + response.data.length);
+        }
+        return toHex(response.data);
+    }
+
+    private void verifyAssignedMember(String expectedMemberId) {
+        String assignedMemberId = readAssignedMemberIdIfAvailable();
+        if (assignedMemberId == null) {
+            throw new SecurityException("Inserted card has no assigned member ID. Activate it first.");
+        }
+        if (!assignedMemberId.equals(CardId.normalize(expectedMemberId))) {
+            throw new SecurityException("Inserted card is assigned to " + assignedMemberId
                     + ", not requested member " + CardId.normalize(expectedMemberId));
         }
+        boundMemberId = assignedMemberId;
     }
 
     private byte[] signWithMaster(byte[] data) throws Exception {
