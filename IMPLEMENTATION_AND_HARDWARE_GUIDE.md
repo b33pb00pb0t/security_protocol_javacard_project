@@ -457,26 +457,8 @@ The final cleanup verification reruns the build, simulator regression, and
 SELECT-only hardware smoke test. It intentionally does not rerun
 state-changing physical-card commands.
 
-## 13. Known Limitations
 
-- Renewal and deactivation are backend policy operations because the applet
-  does not define corresponding APDUs.
-- Phone number and package type are backend-only and are never sent to the
-  card.
-- The applet accepts malformed BCD date bytes.
-- SHA1withRSA and RSA-512 are project/demo choices and are not suitable for a
-  production deployment.
-- Tier 1 proves card possession by challenge-response, but the applet does not
-  authenticate a signed open-access terminal certificate.
-- Hardware demo keys are stored as files under `hardware_keys/`; production
-  deployments require protected key management.
-- The standalone terminal CLIs are APDU demonstrations and do not implement
-  the GUI's complete CSV backend, audit log, or offline snapshot policy.
-- `MasterTerminal` generates a new standalone master key per run. Do not use
-  it against cards provisioned by `HardwareCardGateway` unless the credentials
-  have been deliberately aligned.
-
-## 14. Reproducible Commands
+## 13. Reproducible Commands
 
 ```powershell
 # Build CAP and host application
